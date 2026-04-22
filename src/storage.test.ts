@@ -25,6 +25,8 @@ describe("storage", () => {
             kind: "player",
             initiativeModifier: 3,
             initiative: 17,
+            currentHp: 12,
+            maxHp: 20,
             conditions: []
           }
         ]

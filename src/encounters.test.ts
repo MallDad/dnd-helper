@@ -60,6 +60,8 @@ function combatant(id: string, initiative: number): EncounterCombatant {
     kind: "monster",
     initiativeModifier: 0,
     initiative,
+    currentHp: 0,
+    maxHp: 0,
     conditions: []
   };
 }

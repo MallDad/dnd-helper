@@ -1,7 +1,9 @@
-import { render, screen, within } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it } from "vitest";
 import App from "./App";
+import { STORAGE_KEY } from "./storage";
+import type { AppState } from "./types";
 
 describe("App workflow", () => {
   beforeEach(() => {
@@ -12,28 +14,44 @@ describe("App workflow", () => {
     const user = userEvent.setup();
     render(<App />);
 
+    await user.click(screen.getByRole("button", { name: /add player/i }));
     await user.type(screen.getByLabelText(/player name/i), "Mira");
     await user.clear(screen.getByLabelText(/player initiative modifier/i));
     await user.type(screen.getByLabelText(/player initiative modifier/i), "3");
     await user.click(screen.getByRole("button", { name: /save player/i }));
 
-    expect(screen.getByText("Mira")).toBeInTheDocument();
+    expect(screen.getAllByText("Mira").length).toBeGreaterThan(0);
 
-    await user.click(screen.getByRole("button", { name: /^add$/i }));
-
+    expect(screen.queryByLabelText(/npc or monster/i)).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: /add npc\/monster/i }));
     await user.type(screen.getByLabelText(/npc or monster/i), "Goblin");
     await user.clear(screen.getByLabelText(/^count$/i));
     await user.type(screen.getByLabelText(/^count$/i), "2");
     await user.selectOptions(screen.getByLabelText(/roll initiative/i), "grouped");
     await user.click(screen.getByRole("button", { name: /add npcs/i }));
 
-    await user.type(screen.getAllByPlaceholderText("Manual")[0], "15");
+    const setupTable = screen.getByRole("table");
+    const setupRows = within(setupTable).getAllByRole("row").slice(1);
+    expect(setupRows.map((row) => within(row).getAllByRole("cell")[0].textContent)).toEqual([
+      "Goblin 1",
+      "Goblin 2",
+      "Mira"
+    ]);
+
     await user.click(screen.getByRole("button", { name: /start combat/i }));
 
     expect(screen.queryByText(/current turn/i)).not.toBeInTheDocument();
-    expect(screen.getByText("HP: xxx")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /previous/i })).toBeDisabled();
+    expect(screen.getByText(/HP:\s*0\/0/i)).toBeInTheDocument();
     expect(screen.getByText("1/3")).toBeInTheDocument();
     expect(screen.getAllByText(/round 1/i).length).toBeGreaterThan(0);
+    const currentStatus = screen.getByLabelText("Current combatant status");
+    expect(within(currentStatus).queryByText(/no action/i)).not.toBeInTheDocument();
+    expect(within(currentStatus).queryByText(/no conditions/i)).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: /next turn/i }));
+    await user.click(screen.getByRole("button", { name: /next turn/i }));
+    expect(screen.getByText("3/3")).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: /add condition/i }));
     const conditionDialog = screen.getByRole("dialog", { name: /add condition/i });
@@ -58,18 +76,357 @@ describe("App workflow", () => {
     await user.click(screen.getByRole("button", { name: /next turn/i }));
 
     expect(screen.getAllByText(/round 2/i).length).toBeGreaterThan(0);
+    expect(within(screen.getByLabelText("Current combatant status")).getByText("Round 1: Shoots an arrow")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: /next turn/i }));
+    await user.click(screen.getByRole("button", { name: /next turn/i }));
+    await user.click(screen.getByRole("button", { name: /next turn/i }));
+
+    expect(screen.getAllByText(/round 3/i).length).toBeGreaterThan(0);
+    expect(within(screen.getByLabelText("Current combatant status")).queryByText("Round 1: Shoots an arrow")).not.toBeInTheDocument();
+    expect(within(screen.getByLabelText("Current combatant status")).queryByText(/no action/i)).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: /previous/i }));
+    await user.click(screen.getByRole("button", { name: /previous/i }));
+    await user.click(screen.getByRole("button", { name: /previous/i }));
+
+    expect(within(screen.getByLabelText("Current combatant status")).getByText("Round 1: Shoots an arrow")).toBeInTheDocument();
+
+    await waitFor(() => {
+      const saved = JSON.parse(localStorage.getItem(STORAGE_KEY) ?? "{}") as AppState;
+      expect(saved.encounter.combatants.find((combatant) => combatant.name === "Mira")?.kind).toBe("player");
+      expect(saved.encounter.combatants.filter((combatant) => combatant.name.startsWith("Goblin")).every((combatant) => combatant.kind === "monster")).toBe(true);
+    });
+
+    await user.click(screen.getByRole("button", { name: /new encounter/i }));
+
+    await waitFor(() => {
+      const saved = JSON.parse(localStorage.getItem(STORAGE_KEY) ?? "{}") as AppState;
+      expect(saved.encounter.actionLog).toHaveLength(0);
+      expect(saved.encounter.combatants.map((combatant) => combatant.name)).toEqual(["Mira"]);
+      expect(saved.encounter.combatants[0].kind).toBe("player");
+      expect(saved.encounter.combatants[0].initiative).toBeNull();
+      expect(saved.encounter.combatants[0].conditions.map((condition) => condition.name)).toEqual(["Poisoned"]);
+      expect(saved.encounter.status).toBe("setup");
+      expect(saved.encounter.round).toBe(1);
+    });
+  }, 10000);
+
+  it("does not wrap previous turn before the first combatant in round one", async () => {
+    const user = userEvent.setup();
+    render(<App />);
+
+    await user.click(screen.getByRole("button", { name: /add npc\/monster/i }));
+    await user.type(screen.getByLabelText(/npc or monster/i), "Goblin");
+    await user.clear(screen.getByLabelText(/^count$/i));
+    await user.type(screen.getByLabelText(/^count$/i), "2");
+    await user.click(screen.getByRole("button", { name: /add npcs/i }));
+    await user.click(screen.getByRole("button", { name: /start combat/i }));
+
+    const previousButton = screen.getByRole("button", { name: /previous/i });
+    expect(screen.getByText("1/2")).toBeInTheDocument();
+    expect(previousButton).toBeDisabled();
+
+    await user.click(previousButton);
+    expect(screen.getByText("1/2")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: /next turn/i }));
+    expect(screen.getByText("2/2")).toBeInTheDocument();
+    expect(previousButton).not.toBeDisabled();
+
+    await user.click(previousButton);
+    expect(screen.getByText("1/2")).toBeInTheDocument();
+    expect(previousButton).toBeDisabled();
+  });
+
+  it("restores every saved party member when starting a new encounter", async () => {
+    const now = new Date().toISOString();
+    const seededState: AppState = {
+      party: [
+        { id: "player-mira", name: "Mira", initiativeModifier: 3 },
+        { id: "player-orrin", name: "Orrin", initiativeModifier: -1 }
+      ],
+      encounter: {
+        id: "encounter-active",
+        name: "Bridge Ambush",
+        status: "active",
+        round: 2,
+        currentTurnIndex: 1,
+        createdAt: now,
+        updatedAt: now,
+        combatants: [
+          {
+            id: "monster-goblin",
+            name: "Goblin",
+            kind: "monster",
+            initiativeModifier: 2,
+            initiative: 18,
+            currentHp: 7,
+            maxHp: 7,
+            conditions: [{ id: "condition-afraid", name: "Frightened" }]
+          },
+          {
+            id: "player-mira",
+            name: "Mira",
+            kind: "player",
+            initiativeModifier: 3,
+            initiative: 14,
+            currentHp: 12,
+            maxHp: 20,
+            conditions: [{ id: "condition-poisoned", name: "Poisoned" }]
+          },
+          {
+            id: "npc-sildar",
+            name: "Sildar",
+            kind: "npc",
+            initiativeModifier: 1,
+            initiative: 9,
+            currentHp: 9,
+            maxHp: 9,
+            conditions: [{ id: "condition-prone", name: "Prone" }]
+          }
+        ],
+        actionLog: [
+          {
+            id: "action-mira",
+            round: 1,
+            combatantId: "player-mira",
+            combatantName: "Mira",
+            text: "Shoots an arrow",
+            createdAt: now
+          }
+        ]
+      }
+    };
+    const user = userEvent.setup();
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(seededState));
+    render(<App />);
+
+    await user.click(screen.getByRole("button", { name: /new encounter/i }));
+
+    await waitFor(() => {
+      const saved = JSON.parse(localStorage.getItem(STORAGE_KEY) ?? "{}") as AppState;
+      expect(saved.encounter.actionLog).toHaveLength(0);
+      expect(saved.encounter.combatants.map((combatant) => combatant.name)).toEqual(["Mira", "Orrin", "Sildar"]);
+      expect(saved.encounter.combatants.map((combatant) => combatant.kind)).toEqual(["player", "player", "npc"]);
+      expect(saved.encounter.combatants.every((combatant) => combatant.initiative === null)).toBe(true);
+      expect(saved.encounter.combatants.find((combatant) => combatant.name === "Mira")?.conditions.map((condition) => condition.name)).toEqual(["Poisoned"]);
+      expect(saved.encounter.combatants.find((combatant) => combatant.name === "Orrin")?.conditions).toEqual([]);
+      expect(saved.encounter.combatants.find((combatant) => combatant.name === "Sildar")?.conditions.map((condition) => condition.name)).toEqual(["Prone"]);
+      expect(saved.encounter.combatants.some((combatant) => combatant.kind === "monster")).toBe(false);
+    });
+  });
+
+  it("renders compact turn cards with previous-round actions, HP controls, and collapsed conditions", async () => {
+    const user = userEvent.setup();
+    const now = new Date().toISOString();
+    const seededState: AppState = {
+      party: [{ id: "player-mira", name: "Mira", initiativeModifier: 3 }],
+      encounter: {
+        id: "encounter-turn-cards",
+        name: "Cavern Fight",
+        status: "active",
+        round: 2,
+        currentTurnIndex: 1,
+        createdAt: now,
+        updatedAt: now,
+        combatants: [
+          {
+            id: "player-mira",
+            name: "Mira",
+            kind: "player",
+            initiativeModifier: 3,
+            initiative: 17,
+            currentHp: 12,
+            maxHp: 20,
+            conditions: [
+              { id: "condition-poisoned", name: "Poisoned" },
+              { id: "condition-prone", name: "Prone" }
+            ]
+          },
+          {
+            id: "npc-sildar",
+            name: "Sildar",
+            kind: "npc",
+            initiativeModifier: 1,
+            initiative: 12,
+            currentHp: 8,
+            maxHp: 10,
+            conditions: []
+          },
+          {
+            id: "monster-goblin",
+            name: "Goblin",
+            kind: "monster",
+            initiativeModifier: 2,
+            initiative: 9,
+            currentHp: 6,
+            maxHp: 6,
+            conditions: []
+          }
+        ],
+        actionLog: [
+          {
+            id: "action-mira-r1",
+            round: 1,
+            combatantId: "player-mira",
+            combatantName: "Mira",
+            text: "Shoots an arrow",
+            createdAt: now
+          },
+          {
+            id: "action-mira-r0",
+            round: 0,
+            combatantId: "player-mira",
+            combatantName: "Mira",
+            text: "Older action",
+            createdAt: now
+          }
+        ]
+      }
+    };
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(seededState));
+    render(<App />);
+
+    const miraCard = screen.getByLabelText("Mira, player, 1 in initiative order");
+    expect(miraCard).toHaveClass("turn-card-player");
+    expect(miraCard).toHaveClass("acted");
+    expect(screen.getByLabelText("Sildar, npc, 2 in initiative order")).toHaveClass("current");
+    expect(within(miraCard).getByRole("button", { name: "12/20" })).toBeInTheDocument();
+    expect(within(miraCard).getByText("Round 1: Shoots an arrow")).toBeInTheDocument();
+    expect(within(miraCard).queryByText("Older action")).not.toBeInTheDocument();
+    expect(within(miraCard).getByText("Prone")).toBeInTheDocument();
+    expect(within(miraCard).queryByText("Poisoned")).not.toBeInTheDocument();
+    expect(within(miraCard).getByText("+1")).toHaveAttribute("title", "Poisoned\nProne");
+    expect(screen.getByLabelText("Sildar, npc, 2 in initiative order")).toHaveClass("turn-card-npc");
+    expect(screen.getByLabelText("Goblin, monster, 3 in initiative order")).toHaveClass("turn-card-monster");
+
+    await user.click(within(miraCard).getByRole("button", { name: "12/20" }));
+    const damageDialog = screen.getByRole("dialog", { name: /apply damage/i });
+    await user.type(screen.getByLabelText(/damage taken/i), "5");
+    await user.click(within(damageDialog).getByRole("button", { name: /apply damage/i }));
+    expect(within(miraCard).getByRole("button", { name: "7/20" })).toBeInTheDocument();
+
+    await user.click(within(miraCard).getByRole("button", { name: "7/20" }));
+    await user.click(screen.getByRole("button", { name: /dead/i }));
+    expect(within(miraCard).getByRole("button", { name: "0/20" })).toBeInTheDocument();
+  });
+
+  it("applies a searched condition to selected combatant cards", async () => {
+    const now = new Date().toISOString();
+    const seededState: AppState = {
+      party: [{ id: "player-mira", name: "Mira", initiativeModifier: 3 }],
+      encounter: {
+        id: "encounter-conditions",
+        name: "Sleep Spell",
+        status: "active",
+        round: 1,
+        currentTurnIndex: 0,
+        createdAt: now,
+        updatedAt: now,
+        combatants: [
+          {
+            id: "player-mira",
+            name: "Mira",
+            kind: "player",
+            initiativeModifier: 3,
+            initiative: 17,
+            currentHp: 12,
+            maxHp: 20,
+            conditions: []
+          },
+          {
+            id: "monster-goblin",
+            name: "Goblin",
+            kind: "monster",
+            initiativeModifier: 2,
+            initiative: 9,
+            currentHp: 6,
+            maxHp: 6,
+            conditions: []
+          }
+        ],
+        actionLog: []
+      }
+    };
+    const user = userEvent.setup();
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(seededState));
+    render(<App />);
+
+    await user.click(screen.getByRole("button", { name: /^apply condition$/i }));
+    const conditionInput = screen.getByLabelText(/^condition$/i);
+    await user.type(conditionInput, "po");
+    await user.keyboard("{Tab}");
+    const applyPoisonedButton = screen.getByRole("button", { name: /^apply poisoned$/i });
+    expect(applyPoisonedButton).toBeDisabled();
+
+    const miraCard = screen.getByLabelText("Mira, player, 1 in initiative order");
+    const goblinCard = screen.getByLabelText("Goblin, monster, 2 in initiative order");
+    await user.click(goblinCard);
+    expect(goblinCard).toHaveClass("selected");
+    expect(miraCard).not.toHaveClass("selected");
+    expect(applyPoisonedButton).toHaveClass("ready");
+
+    await user.click(applyPoisonedButton);
+
+    expect(within(goblinCard).getByText("Poisoned")).toBeInTheDocument();
+    expect(within(miraCard).queryByText("Poisoned")).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: /^apply condition$/i }));
+    await user.type(screen.getByLabelText(/^condition$/i), "Sleepy");
+    await user.keyboard("{Tab}");
+    expect(screen.getByRole("button", { name: /^apply sleepy$/i })).toBeInTheDocument();
+  });
+
+  it("enters card selection mode when a condition is picked from the input list", async () => {
+    const now = new Date().toISOString();
+    const seededState: AppState = {
+      party: [{ id: "player-mira", name: "Mira", initiativeModifier: 3 }],
+      encounter: {
+        id: "encounter-condition-list",
+        name: "List Pick",
+        status: "active",
+        round: 1,
+        currentTurnIndex: 0,
+        createdAt: now,
+        updatedAt: now,
+        combatants: [
+          {
+            id: "player-mira",
+            name: "Mira",
+            kind: "player",
+            initiativeModifier: 3,
+            initiative: 17,
+            currentHp: 12,
+            maxHp: 20,
+            conditions: []
+          }
+        ],
+        actionLog: []
+      }
+    };
+    const user = userEvent.setup();
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(seededState));
+    render(<App />);
+
+    await user.click(screen.getByRole("button", { name: /^apply condition$/i }));
+    fireEvent.change(screen.getByLabelText(/^condition$/i), { target: { value: "Prone" } });
+
+    expect(screen.getByRole("button", { name: /^apply prone$/i })).toBeDisabled();
+    await user.click(screen.getByLabelText("Mira, player, 1 in initiative order"));
+    expect(screen.getByRole("button", { name: /^apply prone$/i })).toHaveClass("ready");
   });
 
   it("persists the app after refresh", async () => {
     const user = userEvent.setup();
     const { unmount } = render(<App />);
 
+    await user.click(screen.getByRole("button", { name: /add player/i }));
     await user.type(screen.getByLabelText(/player name/i), "Orrin");
     await user.click(screen.getByRole("button", { name: /save player/i }));
     unmount();
 
     render(<App />);
 
-    expect(screen.getByText("Orrin")).toBeInTheDocument();
+    expect(screen.getAllByText("Orrin").length).toBeGreaterThan(0);
   });
 });

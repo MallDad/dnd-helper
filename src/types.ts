@@ -13,6 +13,8 @@ export type EncounterCombatant = {
   kind: CombatantKind;
   initiativeModifier: number;
   initiative: number | null;
+  currentHp: number;
+  maxHp: number;
   groupKey?: string;
   conditions: ActiveCondition[];
   notes?: string;

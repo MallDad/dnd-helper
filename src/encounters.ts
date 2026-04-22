@@ -48,6 +48,8 @@ export function makeNpcCombatants(draft: NpcDraft, roller: Roller = Math.random)
       kind: draft.kind,
       initiativeModifier: draft.initiativeModifier,
       initiative,
+      currentHp: 0,
+      maxHp: 0,
       groupKey: draft.rollMode === "grouped" ? groupKey : undefined,
       conditions: [],
       notes: draft.notes?.trim() || undefined
@@ -76,6 +78,18 @@ export function latestActionByCombatant(encounter: Encounter, combatantId: strin
     const action = encounter.actionLog[index];
 
     if (action.combatantId === combatantId) {
+      return action;
+    }
+  }
+
+  return undefined;
+}
+
+export function latestActionByCombatantForRound(encounter: Encounter, combatantId: string, round: number) {
+  for (let index = encounter.actionLog.length - 1; index >= 0; index -= 1) {
+    const action = encounter.actionLog[index];
+
+    if (action.combatantId === combatantId && action.round === round) {
       return action;
     }
   }
