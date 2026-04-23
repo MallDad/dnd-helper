@@ -53,19 +53,19 @@ describe("App workflow", () => {
     await user.click(screen.getByRole("button", { name: /next turn/i }));
     expect(screen.getByText("3/3")).toBeInTheDocument();
 
-    await user.click(screen.getByRole("button", { name: /add condition/i }));
-    const conditionDialog = screen.getByRole("dialog", { name: /add condition/i });
-    await user.selectOptions(screen.getByLabelText(/^condition$/i), "Poisoned");
-    await user.type(screen.getByLabelText(/^expiry$/i), "until save succeeds");
-    await user.click(within(conditionDialog).getByRole("button", { name: /add condition/i }));
+    await user.click(screen.getByRole("button", { name: /^apply condition$/i }));
+    await user.type(screen.getByLabelText(/^condition$/i), "po");
+    await user.keyboard("{Tab}");
+    const applyPoisonedButton = screen.getByRole("button", { name: /^apply poisoned$/i });
+    await user.click(screen.getByLabelText("Mira, player, 3 in initiative order"));
+    await user.click(applyPoisonedButton);
 
     expect(screen.getAllByText("Poisoned").length).toBeGreaterThan(0);
     expect(screen.getAllByRole("button", { name: /remove poisoned from/i }).length).toBeGreaterThan(0);
 
     await user.click(screen.getByRole("button", { name: /record action/i }));
-    const actionDialog = screen.getByRole("dialog", { name: /record action/i });
-    await user.type(screen.getByLabelText(/action taken/i), "Shoots an arrow");
-    await user.click(within(actionDialog).getByRole("button", { name: /record action/i }));
+    await user.type(screen.getByLabelText(/action text/i), "Shoots an arrow");
+    await user.keyboard("{Tab}");
 
     const log = screen.getByText("Encounter Log").closest(".action-log");
     expect(log).not.toBeNull();
@@ -139,12 +139,64 @@ describe("App workflow", () => {
     expect(previousButton).toBeDisabled();
   });
 
+  it("replaces or clears the active combatant action for the current round", async () => {
+    const now = new Date().toISOString();
+    const seededState: AppState = {
+      party: [{ id: "player-mira", name: "Mira", initiativeModifier: 3 }],
+      encounter: {
+        id: "encounter-action-entry",
+        name: "Action Entry",
+        status: "active",
+        round: 1,
+        currentTurnIndex: 0,
+        createdAt: now,
+        updatedAt: now,
+        combatants: [
+          {
+            id: "player-mira",
+            name: "Mira",
+            kind: "player",
+            initiativeModifier: 3,
+            initiative: 17,
+            currentHp: 12,
+            maxHp: 20,
+            conditions: []
+          }
+        ],
+        actionLog: []
+      }
+    };
+    const user = userEvent.setup();
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(seededState));
+    render(<App />);
+
+    await user.click(screen.getByRole("button", { name: /record action/i }));
+    await user.type(screen.getByLabelText(/action text/i), "Attack Goblin Warrior 1");
+    await user.keyboard("{Tab}");
+
+    const log = screen.getByText("Encounter Log").closest(".action-log") as HTMLElement;
+    expect(within(log).getByText("Attack Goblin Warrior 1")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: /record action/i }));
+    await user.type(screen.getByLabelText(/action text/i), "Cast Sleep");
+    await user.keyboard("{Tab}");
+
+    expect(within(log).queryByText("Attack Goblin Warrior 1")).not.toBeInTheDocument();
+    expect(within(log).getByText("Cast Sleep")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: /record action/i }));
+    await user.keyboard("{Tab}");
+
+    expect(within(log).queryByText("Cast Sleep")).not.toBeInTheDocument();
+    expect(within(log).getByText("Actions recorded here stay with this encounter.")).toBeInTheDocument();
+  });
+
   it("restores every saved party member when starting a new encounter", async () => {
     const now = new Date().toISOString();
     const seededState: AppState = {
       party: [
         { id: "player-mira", name: "Mira", initiativeModifier: 3 },
-        { id: "player-orrin", name: "Orrin", initiativeModifier: -1 }
+        { id: "player-orrin", name: "Orrin", initiativeModifier: -1, maxHp: 16 }
       ],
       encounter: {
         id: "encounter-active",
@@ -213,8 +265,148 @@ describe("App workflow", () => {
       expect(saved.encounter.combatants.find((combatant) => combatant.name === "Mira")?.conditions.map((condition) => condition.name)).toEqual(["Poisoned"]);
       expect(saved.encounter.combatants.find((combatant) => combatant.name === "Orrin")?.conditions).toEqual([]);
       expect(saved.encounter.combatants.find((combatant) => combatant.name === "Sildar")?.conditions.map((condition) => condition.name)).toEqual(["Prone"]);
+      expect(saved.encounter.combatants.find((combatant) => combatant.name === "Mira")?.maxHp).toBe(20);
+      expect(saved.encounter.combatants.find((combatant) => combatant.name === "Orrin")?.maxHp).toBe(16);
+      expect(saved.encounter.combatants.find((combatant) => combatant.name === "Sildar")?.maxHp).toBe(9);
       expect(saved.encounter.combatants.some((combatant) => combatant.kind === "monster")).toBe(false);
     });
+  });
+
+  it("removes every condition from the encounter setup controls", async () => {
+    const now = new Date().toISOString();
+    const seededState: AppState = {
+      party: [{ id: "player-mira", name: "Mira", initiativeModifier: 3 }],
+      encounter: {
+        id: "encounter-conditions-clear",
+        name: "Condition Cleanup",
+        status: "active",
+        round: 2,
+        currentTurnIndex: 1,
+        createdAt: now,
+        updatedAt: now,
+        combatants: [
+          {
+            id: "player-mira",
+            name: "Mira",
+            kind: "player",
+            initiativeModifier: 3,
+            initiative: 17,
+            currentHp: 12,
+            maxHp: 20,
+            conditions: [{ id: "condition-poisoned", name: "Poisoned" }]
+          },
+          {
+            id: "monster-goblin",
+            name: "Goblin",
+            kind: "monster",
+            initiativeModifier: 2,
+            initiative: 9,
+            currentHp: 6,
+            maxHp: 6,
+            conditions: [
+              { id: "condition-prone", name: "Prone" },
+              { id: "condition-frightened", name: "Frightened" }
+            ]
+          }
+        ],
+        actionLog: [
+          {
+            id: "action-mira",
+            round: 1,
+            combatantId: "player-mira",
+            combatantName: "Mira",
+            text: "Shoots an arrow",
+            createdAt: now
+          }
+        ]
+      }
+    };
+    const user = userEvent.setup();
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(seededState));
+    render(<App />);
+
+    await user.click(screen.getByRole("button", { name: /remove all conditions/i }));
+
+    await waitFor(() => {
+      const saved = JSON.parse(localStorage.getItem(STORAGE_KEY) ?? "{}") as AppState;
+      expect(saved.encounter.combatants.every((combatant) => combatant.conditions.length === 0)).toBe(true);
+      expect(saved.encounter.actionLog).toHaveLength(1);
+      expect(saved.encounter.round).toBe(2);
+      expect(saved.encounter.currentTurnIndex).toBe(1);
+      expect(saved.encounter.combatants.map((combatant) => combatant.name)).toEqual(["Mira", "Goblin"]);
+    });
+  });
+
+  it("edits initiative scores and max HP directly in the encounter setup table", async () => {
+    const now = new Date().toISOString();
+    const seededState: AppState = {
+      party: [{ id: "player-mira", name: "Mira", initiativeModifier: 3 }],
+      encounter: {
+        id: "encounter-initiative-edit",
+        name: "Initiative Entry",
+        status: "setup",
+        round: 1,
+        currentTurnIndex: 0,
+        createdAt: now,
+        updatedAt: now,
+        combatants: [
+          {
+            id: "player-mira",
+            name: "Mira",
+            kind: "player",
+            initiativeModifier: 3,
+            initiative: null,
+            currentHp: 12,
+            maxHp: 20,
+            conditions: []
+          },
+          {
+            id: "monster-goblin",
+            name: "Goblin",
+            kind: "monster",
+            initiativeModifier: 2,
+            initiative: 12,
+            currentHp: 6,
+            maxHp: 6,
+            conditions: []
+          },
+          {
+            id: "npc-sildar",
+            name: "Sildar",
+            kind: "npc",
+            initiativeModifier: 1,
+            initiative: 5,
+            currentHp: 9,
+            maxHp: 9,
+            conditions: []
+          }
+        ],
+        actionLog: []
+      }
+    };
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(seededState));
+    render(<App />);
+
+    const setupTable = screen.getByRole("table");
+    const rowNames = () => within(setupTable).getAllByRole("row").slice(1).map((row) => within(row).getAllByRole("cell")[0].textContent);
+    expect(rowNames()).toEqual(["Goblin", "Sildar", "Mira"]);
+
+    fireEvent.change(screen.getByLabelText("Initiative for Mira"), { target: { value: "19" } });
+    expect(rowNames()).toEqual(["Mira", "Goblin", "Sildar"]);
+
+    fireEvent.change(screen.getByLabelText("Max HP for Mira"), { target: { value: "24" } });
+    expect(screen.getByText(/HP:\s*12\/24/i)).toBeInTheDocument();
+
+    fireEvent.change(screen.getByLabelText("Initiative for Goblin"), { target: { value: "" } });
+
+    await waitFor(() => {
+      const saved = JSON.parse(localStorage.getItem(STORAGE_KEY) ?? "{}") as AppState;
+      expect(saved.encounter.combatants.find((combatant) => combatant.name === "Mira")?.initiative).toBe(19);
+      expect(saved.encounter.combatants.find((combatant) => combatant.name === "Mira")?.maxHp).toBe(24);
+      expect(saved.party.find((player) => player.name === "Mira")?.maxHp).toBe(24);
+      expect(saved.encounter.combatants.find((combatant) => combatant.name === "Goblin")?.initiative).toBeNull();
+    });
+    expect(rowNames()).toEqual(["Mira", "Sildar", "Goblin"]);
   });
 
   it("renders compact turn cards with previous-round actions, HP controls, and collapsed conditions", async () => {

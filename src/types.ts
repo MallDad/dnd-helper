@@ -2,6 +2,7 @@ export type PlayerCharacter = {
   id: string;
   name: string;
   initiativeModifier: number;
+  maxHp?: number;
   notes?: string;
 };
 

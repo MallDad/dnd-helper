@@ -9,7 +9,7 @@ import {
 } from "./encounters";
 import { createId } from "./id";
 import { defaultState, loadState, saveState } from "./storage";
-import type { ActiveCondition, AppState, CombatantKind, Encounter, EncounterCombatant, PlayerCharacter, RollMode } from "./types";
+import type { AppState, CombatantKind, Encounter, EncounterCombatant, PlayerCharacter, RollMode } from "./types";
 
 type PlayerForm = {
   id?: string;
@@ -25,14 +25,6 @@ type NpcForm = {
   initiativeModifier: string;
   rollMode: RollMode;
   notes: string;
-};
-
-type ConditionForm = {
-  combatantId: string;
-  name: string;
-  customName: string;
-  note: string;
-  expires: string;
 };
 
 type DamageForm = {
@@ -81,7 +73,8 @@ function App() {
   const [playerForm, setPlayerForm] = useState<PlayerForm>(emptyPlayerForm);
   const [npcForm, setNpcForm] = useState<NpcForm>(emptyNpcForm);
   const [actionText, setActionText] = useState("");
-  const [activeDialog, setActiveDialog] = useState<"condition" | "action" | "damage" | null>(null);
+  const [isActionToolOpen, setIsActionToolOpen] = useState(false);
+  const [activeDialog, setActiveDialog] = useState<"damage" | null>(null);
   const [isPlayerFormOpen, setIsPlayerFormOpen] = useState(false);
   const [isNpcFormOpen, setIsNpcFormOpen] = useState(false);
   const [damageForm, setDamageForm] = useState<DamageForm>({
@@ -92,13 +85,6 @@ function App() {
   const [conditionSearch, setConditionSearch] = useState("");
   const [chosenConditionName, setChosenConditionName] = useState("");
   const [selectedConditionTargets, setSelectedConditionTargets] = useState<string[]>([]);
-  const [conditionForm, setConditionForm] = useState<ConditionForm>({
-    combatantId: "",
-    name: DEFAULT_CONDITIONS_2024[0],
-    customName: "",
-    note: "",
-    expires: ""
-  });
 
   useEffect(() => {
     saveState(state);
@@ -141,6 +127,7 @@ function App() {
       id: playerForm.id ?? createId("player"),
       name,
       initiativeModifier: numberFromInput(playerForm.initiativeModifier),
+      maxHp: state.party.find((item) => item.id === playerForm.id)?.maxHp ?? 0,
       notes: playerForm.notes.trim() || undefined
     };
 
@@ -162,7 +149,7 @@ function App() {
               initiativeModifier: player.initiativeModifier,
               initiative: null,
               currentHp: 0,
-              maxHp: 0,
+              maxHp: player.maxHp ?? 0,
               conditions: [],
               notes: player.notes
             }
@@ -206,6 +193,27 @@ function App() {
     })));
   }
 
+  function updateCombatantInitiative(id: string, value: string) {
+    const initiative = value.trim() === "" ? null : numberFromInput(value);
+    updateCombatant(id, { initiative });
+  }
+
+  function updateCombatantMaxHp(combatant: EncounterCombatant, value: string) {
+    const maxHp = Math.max(0, numberFromInput(value));
+
+    commitState(updateEncounter({
+      ...state,
+      party: combatant.kind === "player"
+        ? state.party.map((player) => (player.id === combatant.id ? { ...player, maxHp } : player))
+        : state.party
+    }, (encounter) => ({
+      ...encounter,
+      combatants: encounter.combatants.map((item) =>
+        item.id === combatant.id ? { ...item, maxHp } : item
+      )
+    })));
+  }
+
   function startEncounter() {
     commitState(updateEncounter(state, (encounter) => ({
       ...encounter,
@@ -239,7 +247,7 @@ function App() {
         initiativeModifier: player.initiativeModifier,
         initiative: null,
         currentHp: existingCombatant?.currentHp ?? 0,
-        maxHp: existingCombatant?.maxHp ?? 0,
+        maxHp: existingCombatant?.maxHp ?? player.maxHp ?? 0,
         conditions: existingCombatant?.conditions ?? [],
         notes: player.notes
       };
@@ -259,6 +267,16 @@ function App() {
       }
     });
     setActionText("");
+  }
+
+  function removeAllConditions() {
+    commitState(updateEncounter(state, (encounter) => ({
+      ...encounter,
+      combatants: encounter.combatants.map((combatant) => ({
+        ...combatant,
+        conditions: []
+      }))
+    })));
   }
 
   function nextTurn() {
@@ -307,61 +325,45 @@ function App() {
     }));
   }
 
-  function handleAddAction(event: FormEvent) {
-    event.preventDefault();
-
-    if (!currentCombatant || !actionText.trim()) {
+  function recordCurrentAction() {
+    if (!currentCombatant) {
       return;
     }
 
     commitState(updateEncounter(state, (encounter) => ({
       ...encounter,
       actionLog: [
-        ...encounter.actionLog,
-        {
-          id: createId("action"),
-          round: encounter.round,
-          combatantId: currentCombatant.id,
-          combatantName: currentCombatant.name,
-          text: actionText.trim(),
-          createdAt: new Date().toISOString()
-        }
+        ...encounter.actionLog.filter(
+          (action) => action.combatantId !== currentCombatant.id || action.round !== encounter.round
+        ),
+        ...(actionText.trim()
+          ? [{
+              id: createId("action"),
+              round: encounter.round,
+              combatantId: currentCombatant.id,
+              combatantName: currentCombatant.name,
+              text: actionText.trim(),
+              createdAt: new Date().toISOString()
+            }]
+          : [])
       ]
     })));
     setActionText("");
-    setActiveDialog(null);
+    setIsActionToolOpen(false);
   }
 
-  function handleAddCondition(event: FormEvent) {
-    event.preventDefault();
-    const combatantId = conditionForm.combatantId || currentCombatant?.id;
-    const selectedName = conditionForm.name === "Custom" ? conditionForm.customName : conditionForm.name;
-    const conditionName = selectedName.trim();
-
-    if (!combatantId || !conditionName) {
+  function handleActionTextKeyDown(event: KeyboardEvent<HTMLInputElement>) {
+    if (event.key === "Escape") {
+      event.preventDefault();
+      setActionText("");
+      setIsActionToolOpen(false);
       return;
     }
 
-    const condition: ActiveCondition = {
-      id: createId("condition"),
-      name: conditionName,
-      note: conditionForm.note.trim() || undefined,
-      expires: conditionForm.expires.trim() || undefined
-    };
-
-    const combatant = state.encounter.combatants.find((item) => item.id === combatantId);
-
-    updateCombatant(combatantId, {
-      conditions: [...(combatant?.conditions ?? []), condition]
-    });
-    setConditionForm({
-      combatantId,
-      name: DEFAULT_CONDITIONS_2024[0],
-      customName: "",
-      note: "",
-      expires: ""
-    });
-    setActiveDialog(null);
+    if (event.key === "Tab") {
+      event.preventDefault();
+      recordCurrentAction();
+    }
   }
 
   function removeCondition(combatantId: string, conditionId: string) {
@@ -376,20 +378,9 @@ function App() {
     });
   }
 
-  function openConditionDialog() {
-    setConditionForm({
-      combatantId: currentCombatant?.id ?? "",
-      name: DEFAULT_CONDITIONS_2024[0],
-      customName: "",
-      note: "",
-      expires: ""
-    });
-    setActiveDialog("condition");
-  }
-
-  function openActionDialog() {
+  function openActionTool() {
     setActionText("");
-    setActiveDialog("action");
+    setIsActionToolOpen(true);
   }
 
   function openDamageDialog(combatantId: string) {
@@ -685,6 +676,7 @@ function App() {
                 <tr>
                   <th>Name</th>
                   <th>Initiative</th>
+                  <th>Max HP</th>
                   <th>Conditions</th>
                   <th>Last Action</th>
                 </tr>
@@ -692,7 +684,7 @@ function App() {
               <tbody>
                 {state.encounter.combatants.length === 0 ? (
                   <tr>
-                    <td colSpan={4} className="empty">Add players and monsters to build the encounter.</td>
+                    <td colSpan={5} className="empty">Add players and monsters to build the encounter.</td>
                   </tr>
                 ) : null}
                 {orderedCombatants.map((combatant) => {
@@ -701,7 +693,27 @@ function App() {
                   return (
                     <tr key={combatant.id}>
                       <td>{combatant.name}</td>
-                      <td>{combatant.initiative ?? "-"}</td>
+                      <td>
+                        <input
+                          className="compact-number-input"
+                          type="number"
+                          aria-label={`Initiative for ${combatant.name}`}
+                          value={combatant.initiative ?? ""}
+                          onChange={(event) => updateCombatantInitiative(combatant.id, event.target.value)}
+                          placeholder="-"
+                        />
+                      </td>
+                      <td>
+                        <input
+                          className="compact-number-input"
+                          type="number"
+                          min="0"
+                          aria-label={`Max HP for ${combatant.name}`}
+                          value={combatant.maxHp || ""}
+                          onChange={(event) => updateCombatantMaxHp(combatant, event.target.value)}
+                          placeholder="0"
+                        />
+                      </td>
                       <td>
                         {combatant.conditions.map((condition) => (
                           <span className="compact-table-line" key={condition.id}>{condition.name}</span>
@@ -728,6 +740,9 @@ function App() {
             <button type="button" className="secondary" onClick={newEncounter}>
               New Encounter
             </button>
+            <button type="button" className="secondary" onClick={removeAllConditions} disabled={state.encounter.combatants.length === 0}>
+              Remove All Conditions
+            </button>
           </div>
         </section>
 
@@ -739,6 +754,21 @@ function App() {
 
           <div className="turn-controls">
             <div className="turn-tool-buttons">
+              {!isActionToolOpen ? (
+                <button type="button" className="secondary action-tool-control" onClick={openActionTool} disabled={!currentCombatant}>
+                  Record Action
+                </button>
+              ) : (
+                <input
+                  className="action-tool-control action-search-control"
+                  aria-label="Action text"
+                  value={actionText}
+                  onChange={(event) => setActionText(event.target.value)}
+                  onKeyDown={handleActionTextKeyDown}
+                  placeholder="Action"
+                  autoFocus
+                />
+              )}
               {!isConditionToolOpen ? (
                 <button type="button" className="secondary condition-tool-control" onClick={toggleConditionTool} disabled={orderedCombatants.length === 0}>
                   Apply Condition
@@ -786,14 +816,6 @@ function App() {
                   HP: {currentCombatant ? `${currentHp(currentCombatant)}/${maxHp(currentCombatant)}` : "0/0"}
                 </span>
                 <span>{currentCombatant ? `${currentOrderNumber}/${orderedCombatants.length}` : "0/0"}</span>
-              </div>
-              <div className="status-actions">
-                <button type="button" className="secondary" onClick={openConditionDialog} disabled={!currentCombatant}>
-                  Add Condition
-                </button>
-                <button type="button" onClick={openActionDialog} disabled={!currentCombatant}>
-                  Record Action
-                </button>
               </div>
               <div className="status-details">
                 {currentLatestAction ? (
@@ -907,101 +929,6 @@ function App() {
           </div>
         </section>
       </section>
-
-      {activeDialog === "condition" ? (
-        <div className="dialog-backdrop" role="presentation">
-          <section className="dialog" role="dialog" aria-modal="true" aria-labelledby="condition-dialog-title">
-            <div className="dialog-heading">
-              <h2 id="condition-dialog-title">Add Condition</h2>
-              <button type="button" className="secondary close-button" onClick={() => setActiveDialog(null)}>
-                Close
-              </button>
-            </div>
-            <form className="dialog-form" onSubmit={handleAddCondition}>
-              <p className="dialog-target">{currentCombatant?.name ?? "No combatant selected"}</p>
-              <label>
-                Condition
-                <select
-                  value={conditionForm.name}
-                  onChange={(event) => setConditionForm({ ...conditionForm, name: event.target.value })}
-                >
-                  {DEFAULT_CONDITIONS_2024.map((condition) => (
-                    <option value={condition} key={condition}>
-                      {condition}
-                    </option>
-                  ))}
-                  <option value="Custom">Custom</option>
-                </select>
-              </label>
-              {conditionForm.name === "Custom" ? (
-                <label>
-                  Custom name
-                  <input
-                    value={conditionForm.customName}
-                    onChange={(event) => setConditionForm({ ...conditionForm, customName: event.target.value })}
-                  />
-                </label>
-              ) : null}
-              <label>
-                Expiry
-                <input
-                  value={conditionForm.expires}
-                  onChange={(event) => setConditionForm({ ...conditionForm, expires: event.target.value })}
-                  placeholder="Until save succeeds"
-                />
-              </label>
-              <label>
-                Note
-                <input
-                  value={conditionForm.note}
-                  onChange={(event) => setConditionForm({ ...conditionForm, note: event.target.value })}
-                  placeholder="Optional"
-                />
-              </label>
-              <div className="button-row">
-                <button type="submit" disabled={!currentCombatant}>
-                  Add Condition
-                </button>
-                <button type="button" className="secondary" onClick={() => setActiveDialog(null)}>
-                  Cancel
-                </button>
-              </div>
-            </form>
-          </section>
-        </div>
-      ) : null}
-
-      {activeDialog === "action" ? (
-        <div className="dialog-backdrop" role="presentation">
-          <section className="dialog" role="dialog" aria-modal="true" aria-labelledby="action-dialog-title">
-            <div className="dialog-heading">
-              <h2 id="action-dialog-title">Record Action</h2>
-              <button type="button" className="secondary close-button" onClick={() => setActiveDialog(null)}>
-                Close
-              </button>
-            </div>
-            <form className="dialog-form" onSubmit={handleAddAction}>
-              <p className="dialog-target">{currentCombatant?.name ?? "No combatant selected"}</p>
-              <label>
-                Action taken
-                <textarea
-                  value={actionText}
-                  onChange={(event) => setActionText(event.target.value)}
-                  placeholder={currentCombatant ? `${currentCombatant.name} attacks, dashes, casts...` : "Add combatants first"}
-                />
-              </label>
-              <div className="button-row">
-                <button type="submit" disabled={!currentCombatant || !actionText.trim()}>
-                  Record Action
-                </button>
-                <button type="button" className="secondary" onClick={() => setActiveDialog(null)}>
-                  Cancel
-                </button>
-              </div>
-            </form>
-          </section>
-        </div>
-      ) : null}
 
       {activeDialog === "damage" ? (
         <div className="dialog-backdrop" role="presentation">

@@ -247,11 +247,23 @@ h3 {
 
 .compact-table th:nth-child(3),
 .compact-table td:nth-child(3) {
-  width: 12ch;
+  width: 8ch;
+}
+
+.compact-number-input {
+  width: 7ch;
+  min-height: 28px;
+  padding: 0.25rem 0.3rem;
+  font-size: 0.84rem;
 }
 
 .compact-table th:nth-child(4),
 .compact-table td:nth-child(4) {
+  width: 12ch;
+}
+
+.compact-table th:nth-child(5),
+.compact-table td:nth-child(5) {
   width: 30ch;
 }
 
@@ -328,6 +340,18 @@ h3 {
   min-height: 34px;
   padding: 0.42rem 0.62rem;
   font-size: 0.86rem;
+}
+
+.action-tool-control {
+  width: 12.5rem;
+  max-width: 12.5rem;
+}
+
+.action-search-control {
+  min-height: 34px;
+  padding: 0.42rem 0.62rem;
+  font-size: 0.86rem;
+  white-space: nowrap;
 }
 
 .condition-tool-control {
@@ -412,18 +436,6 @@ h3 {
 .status-details .latest-action {
   margin-top: 0;
   font-size: 0.88rem;
-}
-
-.status-actions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.4rem;
-}
-
-.status-actions button {
-  min-height: 34px;
-  padding: 0.42rem 0.62rem;
-  font-size: 0.9rem;
 }
 
 .turn-order {
