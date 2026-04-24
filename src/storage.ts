@@ -18,10 +18,32 @@ export function loadState(storage: Storage = window.localStorage): AppState {
   try {
     const parsed = JSON.parse(raw) as Partial<AppState>;
     const fallback = defaultState();
+    const parsedEncounter = parsed.encounter
+      ? {
+          ...fallback.encounter,
+          ...parsed.encounter,
+          combatants: Array.isArray(parsed.encounter.combatants)
+            ? parsed.encounter.combatants.map((combatant) => {
+                const legacyCombatant = combatant as { hp?: unknown; currentHp?: unknown; active?: unknown };
+
+                return {
+                ...combatant,
+                active: typeof legacyCombatant.active === "boolean" ? legacyCombatant.active : true,
+                hp:
+                  typeof legacyCombatant.hp === "number"
+                    ? legacyCombatant.hp
+                    : typeof legacyCombatant.currentHp === "number"
+                      ? legacyCombatant.currentHp
+                      : 0
+                };
+              })
+            : fallback.encounter.combatants
+        }
+      : fallback.encounter;
 
     return {
       party: Array.isArray(parsed.party) ? parsed.party : fallback.party,
-      encounter: parsed.encounter ? { ...fallback.encounter, ...parsed.encounter } : fallback.encounter
+      encounter: parsedEncounter
     };
   } catch {
     return defaultState();

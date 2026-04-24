@@ -139,6 +139,168 @@ describe("App workflow", () => {
     expect(previousButton).toBeDisabled();
   });
 
+  it("adds a new combatant row and locks the name after leaving the field", async () => {
+    const user = userEvent.setup();
+    render(<App />);
+
+    await user.click(screen.getByRole("button", { name: /new combatant/i }));
+    const nameInput = screen.getByLabelText(/name for combatant-/i);
+    await user.type(nameInput, "Bandit");
+    await user.tab();
+    const typeSelect = screen.getByLabelText("Type for Bandit");
+    await user.selectOptions(typeSelect, "npc");
+    await user.tab();
+
+    expect(screen.getAllByText("Bandit").length).toBeGreaterThan(0);
+    expect(screen.queryByDisplayValue("Bandit")).not.toBeInTheDocument();
+    expect(screen.getByText("NPC")).toBeInTheDocument();
+    expect(screen.queryByLabelText("Type for Bandit")).not.toBeInTheDocument();
+    expect(screen.getByLabelText("HP for Bandit")).toBeInTheDocument();
+  });
+
+  it("toggles combatant edit mode for name and type fields", async () => {
+    const user = userEvent.setup();
+    const now = new Date().toISOString();
+    const seededState: AppState = {
+      party: [],
+      encounter: {
+        id: "encounter-edit-mode",
+        name: "Edit Test",
+        status: "setup",
+        round: 1,
+        currentTurnIndex: 0,
+        createdAt: now,
+        updatedAt: now,
+        combatants: [
+          {
+            id: "monster-bandit",
+            name: "Bandit",
+            kind: "monster",
+            active: true,
+            initiativeModifier: 1,
+            initiative: 12,
+            hp: 11,
+            maxHp: 11,
+            conditions: []
+          }
+        ],
+        actionLog: []
+      }
+    };
+
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(seededState));
+    render(<App />);
+
+    expect(screen.queryByDisplayValue("Bandit")).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: /edit combatants/i }));
+    expect(screen.getByRole("button", { name: /done edits/i })).toBeInTheDocument();
+    expect(screen.getByDisplayValue("Bandit")).toBeInTheDocument();
+    expect(screen.getByLabelText("Type for Bandit")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: /done edits/i }));
+    expect(screen.getByRole("button", { name: /edit combatants/i })).toBeInTheDocument();
+    expect(screen.queryByDisplayValue("Bandit")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Type for Bandit")).not.toBeInTheDocument();
+  });
+
+  it("deletes a combatant with the two-step icon button but keeps encounter log history", async () => {
+    const user = userEvent.setup();
+    const now = new Date().toISOString();
+    const seededState: AppState = {
+      party: [],
+      encounter: {
+        id: "encounter-delete-combatant",
+        name: "Delete Test",
+        status: "active",
+        round: 1,
+        currentTurnIndex: 0,
+        createdAt: now,
+        updatedAt: now,
+        combatants: [
+          {
+            id: "monster-bandit",
+            name: "Bandit",
+            kind: "monster",
+            active: true,
+            initiativeModifier: 1,
+            initiative: 12,
+            hp: 11,
+            maxHp: 11,
+            conditions: [{ id: "condition-1", name: "Poisoned" }]
+          }
+        ],
+        actionLog: [
+          {
+            id: "action-bandit",
+            round: 1,
+            combatantId: "monster-bandit",
+            combatantName: "Bandit",
+            text: "Swings a scimitar",
+            createdAt: now
+          }
+        ]
+      }
+    };
+
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(seededState));
+    render(<App />);
+
+    await user.click(screen.getByRole("button", { name: /edit combatants/i }));
+    await user.click(screen.getByRole("button", { name: /delete bandit/i }));
+    expect(screen.getByRole("button", { name: /confirm delete bandit/i })).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: /confirm delete bandit/i }));
+
+    expect(screen.queryByLabelText("Delete Bandit")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Name for monster-bandit")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Bandit, monster, 1 in initiative order")).not.toBeInTheDocument();
+    expect(screen.getByText("Swings a scimitar")).toBeInTheDocument();
+
+    await waitFor(() => {
+      const saved = JSON.parse(localStorage.getItem(STORAGE_KEY) ?? "{}") as AppState;
+      expect(saved.encounter.combatants).toHaveLength(0);
+      expect(saved.encounter.actionLog).toHaveLength(1);
+      expect(saved.encounter.actionLog[0].combatantName).toBe("Bandit");
+    });
+  });
+
+  it("removes a combatant card when its Active checkbox is unchecked", async () => {
+    const user = userEvent.setup();
+    const now = new Date().toISOString();
+    const seededState: AppState = {
+      party: [],
+      encounter: {
+        id: "encounter-active-toggle",
+        name: "Bridge",
+        status: "setup",
+        round: 1,
+        currentTurnIndex: 0,
+        createdAt: now,
+        updatedAt: now,
+        combatants: [
+          {
+            id: "monster-goblin",
+            name: "Goblin",
+            kind: "monster",
+            active: true,
+            initiativeModifier: 2,
+            initiative: 14,
+            hp: 6,
+            maxHp: 6,
+            conditions: []
+          }
+        ],
+        actionLog: []
+      }
+    };
+
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(seededState));
+    render(<App />);
+
+    expect(screen.getByLabelText("Goblin, monster, 1 in initiative order")).toBeInTheDocument();
+    await user.click(screen.getByLabelText("Active for Goblin"));
+    expect(screen.queryByLabelText("Goblin, monster, 1 in initiative order")).not.toBeInTheDocument();
+  });
+
   it("replaces or clears the active combatant action for the current round", async () => {
     const now = new Date().toISOString();
     const seededState: AppState = {
@@ -158,7 +320,7 @@ describe("App workflow", () => {
             kind: "player",
             initiativeModifier: 3,
             initiative: 17,
-            currentHp: 12,
+            hp: 12,
             maxHp: 20,
             conditions: []
           }
@@ -213,7 +375,7 @@ describe("App workflow", () => {
             kind: "monster",
             initiativeModifier: 2,
             initiative: 18,
-            currentHp: 7,
+            hp: 7,
             maxHp: 7,
             conditions: [{ id: "condition-afraid", name: "Frightened" }]
           },
@@ -223,7 +385,7 @@ describe("App workflow", () => {
             kind: "player",
             initiativeModifier: 3,
             initiative: 14,
-            currentHp: 12,
+            hp: 12,
             maxHp: 20,
             conditions: [{ id: "condition-poisoned", name: "Poisoned" }]
           },
@@ -233,7 +395,7 @@ describe("App workflow", () => {
             kind: "npc",
             initiativeModifier: 1,
             initiative: 9,
-            currentHp: 9,
+            hp: 9,
             maxHp: 9,
             conditions: [{ id: "condition-prone", name: "Prone" }]
           }
@@ -291,7 +453,7 @@ describe("App workflow", () => {
             kind: "player",
             initiativeModifier: 3,
             initiative: 17,
-            currentHp: 12,
+            hp: 12,
             maxHp: 20,
             conditions: [{ id: "condition-poisoned", name: "Poisoned" }]
           },
@@ -301,7 +463,7 @@ describe("App workflow", () => {
             kind: "monster",
             initiativeModifier: 2,
             initiative: 9,
-            currentHp: 6,
+            hp: 6,
             maxHp: 6,
             conditions: [
               { id: "condition-prone", name: "Prone" },
@@ -356,7 +518,7 @@ describe("App workflow", () => {
             kind: "player",
             initiativeModifier: 3,
             initiative: null,
-            currentHp: 12,
+            hp: 12,
             maxHp: 20,
             conditions: []
           },
@@ -366,7 +528,7 @@ describe("App workflow", () => {
             kind: "monster",
             initiativeModifier: 2,
             initiative: 12,
-            currentHp: 6,
+            hp: 6,
             maxHp: 6,
             conditions: []
           },
@@ -376,7 +538,7 @@ describe("App workflow", () => {
             kind: "npc",
             initiativeModifier: 1,
             initiative: 5,
-            currentHp: 9,
+            hp: 9,
             maxHp: 9,
             conditions: []
           }
@@ -394,19 +556,90 @@ describe("App workflow", () => {
     fireEvent.change(screen.getByLabelText("Initiative for Mira"), { target: { value: "19" } });
     expect(rowNames()).toEqual(["Mira", "Goblin", "Sildar"]);
 
+    fireEvent.change(screen.getByLabelText("HP for Mira"), { target: { value: "18" } });
+    expect(screen.getByText(/HP:\s*18\/20/i)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "18/20" })).toBeInTheDocument();
+
     fireEvent.change(screen.getByLabelText("Max HP for Mira"), { target: { value: "24" } });
-    expect(screen.getByText(/HP:\s*12\/24/i)).toBeInTheDocument();
+    expect(screen.getByText(/HP:\s*18\/24/i)).toBeInTheDocument();
 
     fireEvent.change(screen.getByLabelText("Initiative for Goblin"), { target: { value: "" } });
 
     await waitFor(() => {
       const saved = JSON.parse(localStorage.getItem(STORAGE_KEY) ?? "{}") as AppState;
       expect(saved.encounter.combatants.find((combatant) => combatant.name === "Mira")?.initiative).toBe(19);
+      expect(saved.encounter.combatants.find((combatant) => combatant.name === "Mira")?.hp).toBe(18);
       expect(saved.encounter.combatants.find((combatant) => combatant.name === "Mira")?.maxHp).toBe(24);
       expect(saved.party.find((player) => player.name === "Mira")?.maxHp).toBe(24);
       expect(saved.encounter.combatants.find((combatant) => combatant.name === "Goblin")?.initiative).toBeNull();
     });
     expect(rowNames()).toEqual(["Mira", "Sildar", "Goblin"]);
+  });
+
+  it("moves a tied initiative row up one slot with the up-arrow control", async () => {
+    const user = userEvent.setup();
+    const now = new Date().toISOString();
+    const seededState: AppState = {
+      party: [],
+      encounter: {
+        id: "encounter-tied-initiative",
+        name: "Tie Test",
+        status: "setup",
+        round: 1,
+        currentTurnIndex: 0,
+        createdAt: now,
+        updatedAt: now,
+        combatants: [
+          {
+            id: "monster-alpha",
+            name: "Alpha",
+            kind: "monster",
+            initiativeModifier: 0,
+            initiative: 15,
+            hp: 5,
+            maxHp: 5,
+            conditions: []
+          },
+          {
+            id: "monster-beta",
+            name: "Beta",
+            kind: "monster",
+            initiativeModifier: 0,
+            initiative: 15,
+            hp: 5,
+            maxHp: 5,
+            conditions: []
+          },
+          {
+            id: "monster-gamma",
+            name: "Gamma",
+            kind: "monster",
+            initiativeModifier: 0,
+            initiative: 12,
+            hp: 5,
+            maxHp: 5,
+            conditions: []
+          }
+        ],
+        actionLog: []
+      }
+    };
+
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(seededState));
+    render(<App />);
+
+    const setupTable = screen.getByRole("table");
+    const rowNames = () => within(setupTable).getAllByRole("row").slice(1).map((row) => within(row).getAllByRole("cell")[0].textContent);
+
+    expect(rowNames()).toEqual(["Alpha", "Beta", "Gamma"]);
+    expect(screen.queryByLabelText("Move Alpha up within initiative 15")).not.toBeInTheDocument();
+    expect(screen.getByLabelText("Move Beta up within initiative 15")).toBeInTheDocument();
+
+    await user.click(screen.getByLabelText("Move Beta up within initiative 15"));
+
+    expect(rowNames()).toEqual(["Beta", "Alpha", "Gamma"]);
+    expect(screen.queryByLabelText("Move Beta up within initiative 15")).not.toBeInTheDocument();
+    expect(screen.getByLabelText("Move Alpha up within initiative 15")).toBeInTheDocument();
   });
 
   it("renders compact turn cards with previous-round actions, HP controls, and collapsed conditions", async () => {
@@ -429,7 +662,7 @@ describe("App workflow", () => {
             kind: "player",
             initiativeModifier: 3,
             initiative: 17,
-            currentHp: 12,
+            hp: 12,
             maxHp: 20,
             conditions: [
               { id: "condition-poisoned", name: "Poisoned" },
@@ -442,7 +675,7 @@ describe("App workflow", () => {
             kind: "npc",
             initiativeModifier: 1,
             initiative: 12,
-            currentHp: 8,
+            hp: 8,
             maxHp: 10,
             conditions: []
           },
@@ -452,7 +685,7 @@ describe("App workflow", () => {
             kind: "monster",
             initiativeModifier: 2,
             initiative: 9,
-            currentHp: 6,
+            hp: 6,
             maxHp: 6,
             conditions: []
           }
@@ -523,7 +756,7 @@ describe("App workflow", () => {
             kind: "player",
             initiativeModifier: 3,
             initiative: 17,
-            currentHp: 12,
+            hp: 12,
             maxHp: 20,
             conditions: []
           },
@@ -533,7 +766,7 @@ describe("App workflow", () => {
             kind: "monster",
             initiativeModifier: 2,
             initiative: 9,
-            currentHp: 6,
+            hp: 6,
             maxHp: 6,
             conditions: []
           }
@@ -588,7 +821,7 @@ describe("App workflow", () => {
             kind: "player",
             initiativeModifier: 3,
             initiative: 17,
-            currentHp: 12,
+            hp: 12,
             maxHp: 20,
             conditions: []
           }

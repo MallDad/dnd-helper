@@ -12,10 +12,12 @@ export type EncounterCombatant = {
   id: string;
   name: string;
   kind: CombatantKind;
+  active?: boolean;
   initiativeModifier: number;
   initiative: number | null;
-  currentHp: number;
+  hp: number;
   maxHp: number;
+  tempHp?: number;
   groupKey?: string;
   conditions: ActiveCondition[];
   notes?: string;

@@ -2,7 +2,6 @@ import { ChangeEvent, FormEvent, KeyboardEvent, useEffect, useMemo, useState } f
 import { DEFAULT_CONDITIONS_2024 } from "./conditions";
 import {
   createEmptyEncounter,
-  latestActionByCombatant,
   latestActionByCombatantForRound,
   makeNpcCombatants,
   sortCombatantsForTurnOrder
@@ -85,6 +84,10 @@ function App() {
   const [conditionSearch, setConditionSearch] = useState("");
   const [chosenConditionName, setChosenConditionName] = useState("");
   const [selectedConditionTargets, setSelectedConditionTargets] = useState<string[]>([]);
+  const [editableNameIds, setEditableNameIds] = useState<string[]>([]);
+  const [editableTypeIds, setEditableTypeIds] = useState<string[]>([]);
+  const [isCombatantEditMode, setIsCombatantEditMode] = useState(false);
+  const [armedDeleteId, setArmedDeleteId] = useState<string | null>(null);
 
   useEffect(() => {
     saveState(state);
@@ -94,9 +97,13 @@ function App() {
     () => sortCombatantsForTurnOrder(state.encounter.combatants),
     [state.encounter.combatants]
   );
-  const currentCombatant = orderedCombatants[state.encounter.currentTurnIndex] ?? orderedCombatants[0];
+  const activeCombatants = useMemo(
+    () => orderedCombatants.filter((combatant) => combatant.active !== false),
+    [orderedCombatants]
+  );
+  const currentCombatant = activeCombatants[state.encounter.currentTurnIndex] ?? activeCombatants[0];
   const currentOrderNumber = currentCombatant
-    ? orderedCombatants.findIndex((combatant) => combatant.id === currentCombatant.id) + 1
+    ? activeCombatants.findIndex((combatant) => combatant.id === currentCombatant.id) + 1
     : 0;
   const isAtEncounterStart = state.encounter.round <= 1 && state.encounter.currentTurnIndex <= 0;
   const previousRound = state.encounter.round - 1;
@@ -110,7 +117,6 @@ function App() {
     )
     : DEFAULT_CONDITIONS_2024;
   const selectedConditionName = chosenConditionName.trim();
-  const activeCombatantIds = new Set(state.encounter.combatants.map((combatant) => combatant.id));
   function commitState(nextState: AppState) {
     setState(nextState);
   }
@@ -146,10 +152,12 @@ function App() {
               id: player.id,
               name: player.name,
               kind: "player",
+              active: true,
               initiativeModifier: player.initiativeModifier,
               initiative: null,
-              currentHp: 0,
+              hp: 0,
               maxHp: player.maxHp ?? 0,
+              tempHp: 0,
               conditions: [],
               notes: player.notes
             }
@@ -198,6 +206,53 @@ function App() {
     updateCombatant(id, { initiative });
   }
 
+  function moveCombatantUpWithinInitiative(id: string) {
+    const orderedIndex = orderedCombatants.findIndex((combatant) => combatant.id === id);
+
+    if (orderedIndex <= 0) {
+      return;
+    }
+
+    const currentCombatant = orderedCombatants[orderedIndex];
+    const previousCombatant = orderedCombatants[orderedIndex - 1];
+
+    if (!currentCombatant || !previousCombatant || currentCombatant.initiative !== previousCombatant.initiative) {
+      return;
+    }
+
+    commitState(updateEncounter(state, (encounter) => {
+      const combatants = [...encounter.combatants];
+      const currentIndex = combatants.findIndex((combatant) => combatant.id === currentCombatant.id);
+      const previousIndex = combatants.findIndex((combatant) => combatant.id === previousCombatant.id);
+
+      if (currentIndex < 0 || previousIndex < 0) {
+        return encounter;
+      }
+
+      [combatants[currentIndex], combatants[previousIndex]] = [combatants[previousIndex], combatants[currentIndex]];
+
+      return {
+        ...encounter,
+        combatants
+      };
+    }));
+  }
+
+  function updateCombatantActive(id: string, active: boolean) {
+    commitState(updateEncounter(state, (encounter) => {
+      const combatants = encounter.combatants.map((combatant) =>
+        combatant.id === id ? { ...combatant, active } : combatant
+      );
+      const nextActiveCount = combatants.filter((combatant) => combatant.active !== false).length;
+
+      return {
+        ...encounter,
+        combatants,
+        currentTurnIndex: nextActiveCount === 0 ? 0 : Math.min(encounter.currentTurnIndex, nextActiveCount - 1)
+      };
+    }));
+  }
+
   function updateCombatantMaxHp(combatant: EncounterCombatant, value: string) {
     const maxHp = Math.max(0, numberFromInput(value));
 
@@ -212,6 +267,91 @@ function App() {
         item.id === combatant.id ? { ...item, maxHp } : item
       )
     })));
+  }
+
+  function updateCombatantTempHp(id: string, value: string) {
+    const tempHp = Math.max(0, numberFromInput(value));
+    updateCombatant(id, { tempHp });
+  }
+
+  function updateCombatantHp(id: string, value: string) {
+    const hp = Math.max(0, numberFromInput(value));
+    updateCombatant(id, { hp });
+  }
+
+  function addInlineCombatant() {
+    const id = createId("combatant");
+
+    commitState(updateEncounter(state, (encounter) => ({
+      ...encounter,
+      combatants: [
+        ...encounter.combatants,
+        {
+          id,
+          name: "",
+          kind: "monster",
+          active: true,
+          initiativeModifier: 0,
+          initiative: null,
+          hp: 0,
+          maxHp: 0,
+          tempHp: 0,
+          conditions: []
+        }
+      ]
+    })));
+    setEditableNameIds((current) => [...current, id]);
+    setEditableTypeIds((current) => [...current, id]);
+  }
+
+  function toggleCombatantEditMode() {
+    setIsCombatantEditMode((isEditing) => {
+      if (isEditing) {
+        setArmedDeleteId(null);
+      }
+
+      return !isEditing;
+    });
+  }
+
+  function updateCombatantName(id: string, value: string) {
+    updateCombatant(id, { name: value });
+  }
+
+  function lockCombatantName(id: string) {
+    const combatant = state.encounter.combatants.find((item) => item.id === id);
+    const nextName = combatant?.name.trim() ? combatant.name.trim() : "Unnamed Combatant";
+
+    updateCombatant(id, { name: nextName });
+    setEditableNameIds((current) => current.filter((editableId) => editableId !== id));
+  }
+
+  function updateCombatantType(id: string, value: CombatantKind) {
+    updateCombatant(id, { kind: value });
+  }
+
+  function lockCombatantType(id: string) {
+    setEditableTypeIds((current) => current.filter((editableId) => editableId !== id));
+  }
+
+  function toggleDeleteArm(id: string) {
+    setArmedDeleteId((current) => current === id ? null : id);
+  }
+
+  function deleteCombatant(id: string) {
+    commitState(updateEncounter(state, (encounter) => {
+      const combatants = encounter.combatants.filter((combatant) => combatant.id !== id);
+      const nextActiveCount = combatants.filter((combatant) => combatant.active !== false).length;
+
+      return {
+        ...encounter,
+        combatants,
+        currentTurnIndex: nextActiveCount === 0 ? 0 : Math.min(encounter.currentTurnIndex, nextActiveCount - 1)
+      };
+    }));
+    setEditableNameIds((current) => current.filter((editableId) => editableId !== id));
+    setEditableTypeIds((current) => current.filter((editableId) => editableId !== id));
+    setArmedDeleteId(null);
   }
 
   function startEncounter() {
@@ -244,10 +384,12 @@ function App() {
         id: player.id,
         name: player.name,
         kind: "player" as const,
+        active: existingCombatant?.active ?? true,
         initiativeModifier: player.initiativeModifier,
         initiative: null,
-        currentHp: existingCombatant?.currentHp ?? 0,
+        hp: existingCombatant?.hp ?? 0,
         maxHp: existingCombatant?.maxHp ?? player.maxHp ?? 0,
+        tempHp: existingCombatant?.tempHp ?? 0,
         conditions: existingCombatant?.conditions ?? [],
         notes: player.notes
       };
@@ -279,15 +421,26 @@ function App() {
     })));
   }
 
+  function longRest() {
+    commitState(updateEncounter(state, (encounter) => ({
+      ...encounter,
+      combatants: encounter.combatants.map((combatant) => ({
+        ...combatant,
+        hp: combatant.maxHp ?? 0,
+        tempHp: 0
+      }))
+    })));
+  }
+
   function nextTurn() {
-    if (orderedCombatants.length === 0) {
+    if (activeCombatants.length === 0) {
       return;
     }
 
     commitState(updateEncounter(state, (encounter) => {
       const nextIndex = encounter.currentTurnIndex + 1;
 
-      if (nextIndex >= orderedCombatants.length) {
+      if (nextIndex >= activeCombatants.length) {
         return {
           ...encounter,
           currentTurnIndex: 0,
@@ -303,7 +456,7 @@ function App() {
   }
 
   function previousTurn() {
-    if (orderedCombatants.length === 0 || state.encounter.round <= 1 && state.encounter.currentTurnIndex <= 0) {
+    if (activeCombatants.length === 0 || state.encounter.round <= 1 && state.encounter.currentTurnIndex <= 0) {
       return;
     }
 
@@ -313,7 +466,7 @@ function App() {
       if (previousIndex < 0) {
         return {
           ...encounter,
-          currentTurnIndex: orderedCombatants.length - 1,
+          currentTurnIndex: activeCombatants.length - 1,
           round: Math.max(1, encounter.round - 1)
         };
       }
@@ -395,12 +548,16 @@ function App() {
     return state.encounter.combatants.find((combatant) => combatant.id === damageForm.combatantId);
   }
 
-  function currentHp(combatant: EncounterCombatant) {
-    return combatant.currentHp ?? 0;
+  function hp(combatant: EncounterCombatant) {
+    return combatant.hp ?? 0;
   }
 
   function maxHp(combatant: EncounterCombatant) {
     return combatant.maxHp ?? 0;
+  }
+
+  function tempHp(combatant: EncounterCombatant) {
+    return Math.max(0, combatant.tempHp ?? 0);
   }
 
   function applyDamage(event: FormEvent) {
@@ -413,7 +570,7 @@ function App() {
 
     const damage = Math.max(0, Math.floor(numberFromInput(damageForm.amount)));
     updateCombatant(combatant.id, {
-      currentHp: Math.max(0, currentHp(combatant) - damage)
+      hp: Math.max(0, hp(combatant) - damage)
     });
     setDamageForm({ combatantId: "", amount: "" });
     setActiveDialog(null);
@@ -427,7 +584,7 @@ function App() {
     }
 
     updateCombatant(combatant.id, {
-      currentHp: 0
+      hp: 0
     });
     setDamageForm({ combatantId: "", amount: "" });
     setActiveDialog(null);
@@ -675,37 +832,130 @@ function App() {
               <thead>
                 <tr>
                   <th>Name</th>
-                  <th>Initiative</th>
-                  <th>Max HP</th>
-                  <th>Conditions</th>
-                  <th>Last Action</th>
+                  <th>Type</th>
+                  <th>Active</th>
+                  <th><span className="compact-table-heading-label">Init</span></th>
+                  <th className="compact-table-heading-cell"><span className="compact-table-heading-label">HP</span></th>
+                  <th className="compact-table-heading-cell"><span className="compact-table-heading-label">Max<br />HP</span></th>
+                  <th className="compact-table-heading-cell"><span className="compact-table-heading-label">Temp HP</span></th>
                 </tr>
               </thead>
               <tbody>
                 {state.encounter.combatants.length === 0 ? (
                   <tr>
-                    <td colSpan={5} className="empty">Add players and monsters to build the encounter.</td>
+                    <td colSpan={7} className="empty">Add players and monsters to build the encounter.</td>
                   </tr>
                 ) : null}
                 {orderedCombatants.map((combatant) => {
-                  const latestAction = latestActionByCombatant(state.encounter, combatant.id);
+                  const orderedIndex = orderedCombatants.findIndex((item) => item.id === combatant.id);
+                  const previousCombatant = orderedIndex > 0 ? orderedCombatants[orderedIndex - 1] : null;
+                  const canMoveUpWithinInitiative =
+                    combatant.initiative !== null &&
+                    previousCombatant?.initiative === combatant.initiative;
+                  const isNameEditable = isCombatantEditMode || editableNameIds.includes(combatant.id);
+                  const isTypeEditable = isCombatantEditMode || editableTypeIds.includes(combatant.id);
+                  const isDeleteArmed = armedDeleteId === combatant.id;
 
                   return (
                     <tr key={combatant.id}>
-                      <td>{combatant.name}</td>
+                      <td>
+                        <div className="name-cell">
+                          {isCombatantEditMode ? (
+                            <button
+                              type="button"
+                              className={`delete-combatant-button${isDeleteArmed ? " armed" : ""}`}
+                              aria-label={isDeleteArmed ? `Confirm delete ${combatant.name || combatant.id}` : `Delete ${combatant.name || combatant.id}`}
+                              onClick={() => {
+                                if (isDeleteArmed) {
+                                  deleteCombatant(combatant.id);
+                                  return;
+                                }
+
+                                toggleDeleteArm(combatant.id);
+                              }}
+                            >
+                              {isDeleteArmed ? "✓" : "🗑"}
+                            </button>
+                          ) : null}
+                          {isNameEditable ? (
+                            <input
+                              className="compact-name-input"
+                              aria-label={`Name for ${combatant.id}`}
+                              value={combatant.name}
+                              onChange={(event) => updateCombatantName(combatant.id, event.target.value)}
+                              onBlur={() => lockCombatantName(combatant.id)}
+                              placeholder="Combatant name"
+                              autoFocus
+                            />
+                          ) : (
+                            <span>{combatant.name}</span>
+                          )}
+                        </div>
+                      </td>
+                      <td>
+                        {isTypeEditable ? (
+                          <select
+                            className="compact-select-input"
+                            aria-label={`Type for ${combatant.name || combatant.id}`}
+                            value={combatant.kind}
+                            onChange={(event) => updateCombatantType(combatant.id, event.target.value as CombatantKind)}
+                            onBlur={() => lockCombatantType(combatant.id)}
+                            autoFocus={!isNameEditable}
+                          >
+                            <option value="player">Player</option>
+                            <option value="npc">NPC</option>
+                            <option value="monster">Monster</option>
+                          </select>
+                        ) : (
+                          combatant.kind === "player" ? "Player" : combatant.kind === "npc" ? "NPC" : "Monster"
+                        )}
+                      </td>
                       <td>
                         <input
-                          className="compact-number-input"
+                          type="checkbox"
+                          aria-label={`Active for ${combatant.name || combatant.id}`}
+                          checked={combatant.active !== false}
+                          onChange={(event) => updateCombatantActive(combatant.id, event.target.checked)}
+                        />
+                      </td>
+                      <td>
+                        <div className="initiative-cell">
+                          {canMoveUpWithinInitiative ? (
+                            <button
+                              type="button"
+                              className="initiative-move-button"
+                              aria-label={`Move ${combatant.name} up within initiative ${combatant.initiative}`}
+                              onClick={() => moveCombatantUpWithinInitiative(combatant.id)}
+                            >
+                              {"\u2191"}
+                            </button>
+                          ) : (
+                            <span className="initiative-move-spacer" aria-hidden="true" />
+                          )}
+                          <input
+                            className="compact-number-input compact-number-input-short"
+                            type="number"
+                            aria-label={`Initiative for ${combatant.name}`}
+                            value={combatant.initiative ?? ""}
+                            onChange={(event) => updateCombatantInitiative(combatant.id, event.target.value)}
+                            placeholder="-"
+                          />
+                        </div>
+                      </td>
+                      <td>
+                        <input
+                          className="compact-number-input compact-number-input-medium"
                           type="number"
-                          aria-label={`Initiative for ${combatant.name}`}
-                          value={combatant.initiative ?? ""}
-                          onChange={(event) => updateCombatantInitiative(combatant.id, event.target.value)}
-                          placeholder="-"
+                          min="0"
+                          aria-label={`HP for ${combatant.name}`}
+                          value={combatant.hp || ""}
+                          onChange={(event) => updateCombatantHp(combatant.id, event.target.value)}
+                          placeholder="0"
                         />
                       </td>
                       <td>
                         <input
-                          className="compact-number-input"
+                          className="compact-number-input compact-number-input-medium"
                           type="number"
                           min="0"
                           aria-label={`Max HP for ${combatant.name}`}
@@ -715,11 +965,16 @@ function App() {
                         />
                       </td>
                       <td>
-                        {combatant.conditions.map((condition) => (
-                          <span className="compact-table-line" key={condition.id}>{condition.name}</span>
-                        ))}
+                        <input
+                          className="compact-number-input compact-number-input-short"
+                          type="number"
+                          min="0"
+                          aria-label={`Temp HP for ${combatant.name}`}
+                          value={combatant.tempHp || ""}
+                          onChange={(event) => updateCombatantTempHp(combatant.id, event.target.value)}
+                          placeholder="0"
+                        />
                       </td>
-                      <td>{latestAction?.text ?? ""}</td>
                     </tr>
                   );
                 })}
@@ -727,9 +982,22 @@ function App() {
             </table>
           </div>
 
+          <div className="inline-control-row">
+            <button type="button" className="secondary section-add-toggle" onClick={addInlineCombatant}>
+              New Combatant
+            </button>
+            <button
+              type="button"
+              className={`secondary section-add-toggle${isCombatantEditMode ? " active-toggle" : ""}`}
+              onClick={toggleCombatantEditMode}
+            >
+              {isCombatantEditMode ? "Done Edits" : "Edit Combatants"}
+            </button>
+          </div>
+
           <div className="button-row encounter-controls">
             {state.encounter.status !== "active" ? (
-              <button type="button" onClick={startEncounter} disabled={state.encounter.combatants.length === 0}>
+              <button type="button" onClick={startEncounter} disabled={activeCombatants.length === 0}>
                 Start Combat
               </button>
             ) : (
@@ -739,6 +1007,9 @@ function App() {
             )}
             <button type="button" className="secondary" onClick={newEncounter}>
               New Encounter
+            </button>
+            <button type="button" className="secondary" onClick={longRest} disabled={state.encounter.combatants.length === 0}>
+              Long Rest
             </button>
             <button type="button" className="secondary" onClick={removeAllConditions} disabled={state.encounter.combatants.length === 0}>
               Remove All Conditions
@@ -770,7 +1041,7 @@ function App() {
                 />
               )}
               {!isConditionToolOpen ? (
-                <button type="button" className="secondary condition-tool-control" onClick={toggleConditionTool} disabled={orderedCombatants.length === 0}>
+                <button type="button" className="secondary condition-tool-control" onClick={toggleConditionTool} disabled={activeCombatants.length === 0}>
                   Apply Condition
                 </button>
               ) : selectedConditionName ? (
@@ -806,16 +1077,16 @@ function App() {
                 Apply Damage
               </button>
             </div>
-            <button type="button" className="secondary" onClick={previousTurn} disabled={orderedCombatants.length === 0 || isAtEncounterStart}>
+            <button type="button" className="secondary" onClick={previousTurn} disabled={activeCombatants.length === 0 || isAtEncounterStart}>
               Previous
             </button>
             <div className="current-status" aria-label="Current combatant status">
               <div className="status-heading">
                 <strong>{currentCombatant?.name ?? "No combatants"}</strong>
                 <span className="status-hp">
-                  HP: {currentCombatant ? `${currentHp(currentCombatant)}/${maxHp(currentCombatant)}` : "0/0"}
+                  HP: {currentCombatant ? `${hp(currentCombatant)}/${maxHp(currentCombatant)}` : "0/0"}
                 </span>
-                <span>{currentCombatant ? `${currentOrderNumber}/${orderedCombatants.length}` : "0/0"}</span>
+                <span>{currentCombatant ? `${currentOrderNumber}/${activeCombatants.length}` : "0/0"}</span>
               </div>
               <div className="status-details">
                 {currentLatestAction ? (
@@ -840,15 +1111,18 @@ function App() {
                     </span>
                   ))}
                 </div>
+                {currentCombatant && tempHp(currentCombatant) > 0 ? (
+                  <span className="status-temp-hp">Temp HP: {tempHp(currentCombatant)}</span>
+                ) : null}
               </div>
             </div>
-            <button type="button" onClick={nextTurn} disabled={orderedCombatants.length === 0}>
+            <button type="button" onClick={nextTurn} disabled={activeCombatants.length === 0}>
               Next Turn
             </button>
           </div>
 
           <div className="turn-order">
-            {orderedCombatants.map((combatant, index) => {
+            {activeCombatants.map((combatant, index) => {
               const previousRoundAction = latestActionByCombatantForRound(
                 state.encounter,
                 combatant.id,
@@ -879,13 +1153,16 @@ function App() {
                   <strong>{combatant.name}</strong>
                   <button
                     type="button"
-                    className="turn-card-hp"
+                    className="turn-card-hp-row"
                     onClick={(event) => {
                       event.stopPropagation();
                       openDamageDialog(combatant.id);
                     }}
                   >
-                    {currentHp(combatant)}/{maxHp(combatant)}
+                    {tempHp(combatant) > 0 ? (
+                      <span className="turn-card-temp-hp">{tempHp(combatant)}</span>
+                    ) : null}
+                    <span className="turn-card-hp">{hp(combatant)}/{maxHp(combatant)}</span>
                   </button>
                   <p className="turn-card-action">
                     {previousRoundAction ? `Round ${previousRoundAction.round}: ${previousRoundAction.text}` : ""}
@@ -912,11 +1189,10 @@ function App() {
 
           <div className="action-log">
             <h3>Encounter Log</h3>
-            {state.encounter.actionLog.filter((action) => activeCombatantIds.has(action.combatantId)).length === 0 ? (
+            {state.encounter.actionLog.length === 0 ? (
               <p className="empty">Actions recorded here stay with this encounter.</p>
             ) : null}
             {state.encounter.actionLog
-              .filter((action) => activeCombatantIds.has(action.combatantId))
               .slice()
               .reverse()
               .map((action) => (
@@ -942,7 +1218,7 @@ function App() {
             <form className="dialog-form" onSubmit={applyDamage}>
               <p className="dialog-target">
                 {selectedDamageCombatant()
-                  ? `${selectedDamageCombatant()?.name} HP ${currentHp(selectedDamageCombatant() as EncounterCombatant)}/${maxHp(selectedDamageCombatant() as EncounterCombatant)}`
+                  ? `${selectedDamageCombatant()?.name} HP ${hp(selectedDamageCombatant() as EncounterCombatant)}/${maxHp(selectedDamageCombatant() as EncounterCombatant)}`
                   : "No combatant selected"}
               </p>
               <label>
