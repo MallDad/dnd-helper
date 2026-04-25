@@ -4,17 +4,10 @@ import { loadState, saveState, STORAGE_KEY } from "./storage";
 import type { AppState } from "./types";
 
 describe("storage", () => {
-  it("saves and reloads the party and encounter", () => {
+  it("saves and reloads the encounter", () => {
     const storage = new MemoryStorage();
     const encounter = createEmptyEncounter("Bridge Ambush");
     const state: AppState = {
-      party: [
-        {
-          id: "player-1",
-          name: "Mira",
-          initiativeModifier: 3
-        }
-      ],
       encounter: {
         ...encounter,
         combatants: [
@@ -35,21 +28,33 @@ describe("storage", () => {
     saveState(state, storage);
 
     expect(loadState(storage)).toMatchObject({
-      party: [{ id: "player-1", name: "Mira", initiativeModifier: 3 }],
       encounter: { name: "Bridge Ambush" }
     });
   });
 
-  it("keeps the saved party across encounter saves", () => {
+  it("keeps encounter combatants across saves", () => {
     const storage = new MemoryStorage();
     const state: AppState = {
-      party: [{ id: "player-2", name: "Orrin", initiativeModifier: -1 }],
-      encounter: createEmptyEncounter("Done")
+      encounter: {
+        ...createEmptyEncounter("Done"),
+        combatants: [
+          {
+            id: "player-2",
+            name: "Orrin",
+            kind: "player",
+            initiativeModifier: -1,
+            initiative: null,
+            hp: 9,
+            maxHp: 16,
+            conditions: []
+          }
+        ]
+      }
     };
 
     saveState(state, storage);
 
-    expect(loadState(storage).party).toEqual([{ id: "player-2", name: "Orrin", initiativeModifier: -1 }]);
+    expect(loadState(storage).encounter.combatants.map((combatant) => combatant.name)).toEqual(["Orrin"]);
   });
 
   it("falls back to defaults when stored data is corrupt", () => {
@@ -58,7 +63,6 @@ describe("storage", () => {
 
     const state = loadState(storage);
 
-    expect(state.party).toEqual([]);
     expect(state.encounter.name).toBe("New Encounter");
   });
 });

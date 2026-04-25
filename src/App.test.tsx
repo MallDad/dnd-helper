@@ -107,7 +107,10 @@ describe("App workflow", () => {
     await waitFor(() => {
       const saved = JSON.parse(localStorage.getItem(STORAGE_KEY) ?? "{}") as AppState;
       expect(saved.encounter.actionLog).toHaveLength(0);
-      expect(saved.encounter.combatants).toEqual([]);
+      expect(saved.encounter.combatants.map((combatant) => combatant.name)).toEqual(["Mira"]);
+      expect(saved.encounter.combatants[0].kind).toBe("player");
+      expect(saved.encounter.combatants[0].initiative).toBeNull();
+      expect(saved.encounter.combatants[0].conditions.map((condition) => condition.name)).toEqual(["Poisoned"]);
       expect(saved.encounter.round).toBe(1);
     });
   }, 10000);
@@ -169,7 +172,6 @@ describe("App workflow", () => {
     const user = userEvent.setup();
     const now = new Date().toISOString();
     const seededState: AppState = {
-      party: [],
       encounter: {
         id: "encounter-edit-mode",
         name: "Edit Test",
@@ -213,7 +215,6 @@ describe("App workflow", () => {
     const user = userEvent.setup();
     const now = new Date().toISOString();
     const seededState: AppState = {
-      party: [],
       encounter: {
         id: "encounter-delete-combatant",
         name: "Delete Test",
@@ -272,7 +273,6 @@ describe("App workflow", () => {
     const user = userEvent.setup();
     const now = new Date().toISOString();
     const seededState: AppState = {
-      party: [],
       encounter: {
         id: "encounter-active-toggle",
         name: "Bridge",
@@ -309,7 +309,6 @@ describe("App workflow", () => {
     const user = userEvent.setup();
     const now = new Date().toISOString();
     const seededState: AppState = {
-      party: [],
       encounter: {
         id: "encounter-inactive-order",
         name: "Inactive Order",
@@ -377,7 +376,6 @@ describe("App workflow", () => {
   it("replaces or clears the active combatant action for the current round", async () => {
     const now = new Date().toISOString();
     const seededState: AppState = {
-      party: [{ id: "player-mira", name: "Mira", initiativeModifier: 3 }],
       encounter: {
         id: "encounter-action-entry",
         name: "Action Entry",
@@ -425,13 +423,9 @@ describe("App workflow", () => {
     expect(within(log).getByText("Actions recorded here stay with this encounter.")).toBeInTheDocument();
   });
 
-  it("restores every saved party member when starting a new encounter", async () => {
+  it("starts a new encounter from the player and NPC rows already in the table", async () => {
     const now = new Date().toISOString();
     const seededState: AppState = {
-      party: [
-        { id: "player-mira", name: "Mira", initiativeModifier: 3 },
-        { id: "player-orrin", name: "Orrin", initiativeModifier: -1, maxHp: 16 }
-      ],
       encounter: {
         id: "encounter-active",
         name: "Bridge Ambush",
@@ -459,6 +453,17 @@ describe("App workflow", () => {
             hp: 12,
             maxHp: 20,
             conditions: [{ id: "condition-poisoned", name: "Poisoned" }]
+          },
+          {
+            id: "player-orrin",
+            name: "Orrin",
+            kind: "player",
+            initiativeModifier: -1,
+            initiative: 11,
+            hp: 14,
+            maxHp: 16,
+            active: false,
+            conditions: []
           },
           {
             id: "npc-sildar",
@@ -508,7 +513,6 @@ describe("App workflow", () => {
   it("removes every condition from the encounter setup controls", async () => {
     const now = new Date().toISOString();
     const seededState: AppState = {
-      party: [{ id: "player-mira", name: "Mira", initiativeModifier: 3 }],
       encounter: {
         id: "encounter-conditions-clear",
         name: "Condition Cleanup",
@@ -572,7 +576,6 @@ describe("App workflow", () => {
   it("edits initiative scores and max HP directly in the encounter setup table", async () => {
     const now = new Date().toISOString();
     const seededState: AppState = {
-      party: [{ id: "player-mira", name: "Mira", initiativeModifier: 3 }],
       encounter: {
         id: "encounter-initiative-edit",
         name: "Initiative Entry",
@@ -639,7 +642,6 @@ describe("App workflow", () => {
       expect(saved.encounter.combatants.find((combatant) => combatant.name === "Mira")?.initiative).toBe(19);
       expect(saved.encounter.combatants.find((combatant) => combatant.name === "Mira")?.hp).toBe(18);
       expect(saved.encounter.combatants.find((combatant) => combatant.name === "Mira")?.maxHp).toBe(24);
-      expect(saved.party.find((player) => player.name === "Mira")?.maxHp).toBe(24);
       expect(saved.encounter.combatants.find((combatant) => combatant.name === "Goblin")?.initiative).toBeNull();
     });
     expect(rowNames()).toEqual(["Mira", "Sildar", "Goblin"]);
@@ -648,7 +650,6 @@ describe("App workflow", () => {
   it("clamps HP so it cannot exceed Max HP", async () => {
     const now = new Date().toISOString();
     const seededState: AppState = {
-      party: [{ id: "player-mira", name: "Mira", initiativeModifier: 3, maxHp: 20 }],
       encounter: {
         id: "encounter-hp-clamp",
         name: "Clamp Test",
@@ -686,7 +687,6 @@ describe("App workflow", () => {
       const saved = JSON.parse(localStorage.getItem(STORAGE_KEY) ?? "{}") as AppState;
       expect(saved.encounter.combatants.find((combatant) => combatant.name === "Mira")?.hp).toBe(15);
       expect(saved.encounter.combatants.find((combatant) => combatant.name === "Mira")?.maxHp).toBe(15);
-      expect(saved.party.find((player) => player.name === "Mira")?.maxHp).toBe(15);
     });
   });
 
@@ -694,7 +694,6 @@ describe("App workflow", () => {
     const user = userEvent.setup();
     const now = new Date().toISOString();
     const seededState: AppState = {
-      party: [],
       encounter: {
         id: "encounter-tied-initiative",
         name: "Tie Test",
@@ -759,7 +758,6 @@ describe("App workflow", () => {
     const user = userEvent.setup();
     const now = new Date().toISOString();
     const seededState: AppState = {
-      party: [{ id: "player-mira", name: "Mira", initiativeModifier: 3 }],
       encounter: {
         id: "encounter-turn-cards",
         name: "Cavern Fight",
@@ -842,7 +840,6 @@ describe("App workflow", () => {
   it("applies toolbar damage to selected cards using temp HP first and adds Unconscious at 0 HP", async () => {
     const now = new Date().toISOString();
     const seededState: AppState = {
-      party: [{ id: "player-mira", name: "Mira", initiativeModifier: 3 }],
       encounter: {
         id: "encounter-damage-tool",
         name: "Damage Test",
@@ -937,7 +934,6 @@ describe("App workflow", () => {
   it("applies a searched condition to selected combatant cards", async () => {
     const now = new Date().toISOString();
     const seededState: AppState = {
-      party: [{ id: "player-mira", name: "Mira", initiativeModifier: 3 }],
       encounter: {
         id: "encounter-conditions",
         name: "Sleep Spell",
@@ -1001,7 +997,6 @@ describe("App workflow", () => {
   it("enters card selection mode when a condition is picked from the input list", async () => {
     const now = new Date().toISOString();
     const seededState: AppState = {
-      party: [{ id: "player-mira", name: "Mira", initiativeModifier: 3 }],
       encounter: {
         id: "encounter-condition-list",
         name: "List Pick",

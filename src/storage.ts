@@ -4,7 +4,6 @@ import type { AppState } from "./types";
 export const STORAGE_KEY = "dnd-helper:v1";
 
 export const defaultState = (): AppState => ({
-  party: [],
   encounter: createEmptyEncounter()
 });
 
@@ -42,7 +41,6 @@ export function loadState(storage: Storage = window.localStorage): AppState {
       : fallback.encounter;
 
     return {
-      party: Array.isArray(parsed.party) ? parsed.party : fallback.party,
       encounter: parsedEncounter
     };
   } catch {

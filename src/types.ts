@@ -1,11 +1,3 @@
-export type PlayerCharacter = {
-  id: string;
-  name: string;
-  initiativeModifier: number;
-  maxHp?: number;
-  notes?: string;
-};
-
 export type CombatantKind = "player" | "npc" | "monster";
 
 export type EncounterCombatant = {
@@ -51,7 +43,6 @@ export type Encounter = {
 };
 
 export type AppState = {
-  party: PlayerCharacter[];
   encounter: Encounter;
 };
 

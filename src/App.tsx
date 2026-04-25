@@ -183,12 +183,7 @@ function App() {
   function updateCombatantMaxHp(combatant: EncounterCombatant, value: string) {
     const maxHp = Math.max(0, numberFromInput(value));
 
-    commitState(updateEncounter({
-      ...state,
-      party: combatant.kind === "player"
-        ? state.party.map((player) => (player.id === combatant.id ? { ...player, maxHp } : player))
-        : state.party
-    }, (encounter) => ({
+    commitState(updateEncounter(state, (encounter) => ({
       ...encounter,
       combatants: encounter.combatants.map((item) =>
         item.id === combatant.id ? { ...item, maxHp, hp: clampHpToMax(item.hp ?? 0, maxHp) } : item
@@ -284,40 +279,17 @@ function App() {
 
   function newEncounter() {
     const nextEncounter = createEmptyEncounter();
-    const existingPlayerCombatants = new Map(
-      state.encounter.combatants
-        .filter((combatant) => combatant.kind === "player")
-        .map((combatant) => [combatant.id, combatant])
-    );
-    const players = state.party.map((player) => {
-      const existingCombatant = existingPlayerCombatants.get(player.id);
-
-      return {
-        id: player.id,
-        name: player.name,
-        kind: "player" as const,
-        active: existingCombatant?.active ?? true,
-        initiativeModifier: player.initiativeModifier,
-        initiative: null,
-        hp: existingCombatant?.hp ?? 0,
-        maxHp: existingCombatant?.maxHp ?? player.maxHp ?? 0,
-        tempHp: existingCombatant?.tempHp ?? 0,
-        conditions: existingCombatant?.conditions ?? [],
-        notes: player.notes
-      };
-    });
-    const npcs = state.encounter.combatants
-      .filter((combatant) => combatant.kind === "npc")
+    const returningCombatants = state.encounter.combatants
+      .filter((combatant) => combatant.kind !== "monster")
       .map((combatant) => ({
         ...combatant,
         initiative: null
       }));
 
     commitState({
-      ...state,
       encounter: {
         ...nextEncounter,
-        combatants: [...players, ...npcs]
+        combatants: returningCombatants
       }
     });
     setActionText("");
@@ -636,7 +608,7 @@ function App() {
           <h1>D&D Helper</h1>
         </div>
         <div className="header-status">
-          <span>{state.party.length} players</span>
+          <span>{state.encounter.combatants.filter((combatant) => combatant.kind === "player").length} players</span>
           <span>{state.encounter.combatants.length} combatants</span>
           <span>Round {state.encounter.round}</span>
         </div>
@@ -817,10 +789,21 @@ function App() {
           </div>
 
           <div className="button-row encounter-controls">
-            <button type="button" className="secondary" onClick={newEncounter}>
+            <button
+              type="button"
+              className="secondary"
+              onClick={newEncounter}
+              title={"Removes monsters\nClears initiative\nClears Encounter Log\nResets round tracking"}
+            >
               New Encounter
             </button>
-            <button type="button" className="secondary" onClick={longRest} disabled={state.encounter.combatants.length === 0}>
+            <button
+              type="button"
+              className="secondary"
+              onClick={longRest}
+              disabled={state.encounter.combatants.length === 0}
+              title={"Restores HP to Max HP\nClears Temp HP"}
+            >
               Long Rest
             </button>
             <button type="button" className="secondary" onClick={removeAllConditions} disabled={state.encounter.combatants.length === 0}>
