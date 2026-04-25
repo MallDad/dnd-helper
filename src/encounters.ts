@@ -18,7 +18,6 @@ export function createEmptyEncounter(name = "New Encounter"): Encounter {
   return {
     id: createId("encounter"),
     name,
-    status: "setup",
     round: 1,
     currentTurnIndex: 0,
     combatants: [],
@@ -62,6 +61,17 @@ export function sortCombatantsForTurnOrder(combatants: EncounterCombatant[]): En
   return combatants
     .map((combatant, index) => ({ combatant, index }))
     .sort((a, b) => {
+      const aIsActive = a.combatant.active !== false;
+      const bIsActive = b.combatant.active !== false;
+
+      if (aIsActive !== bIsActive) {
+        return aIsActive ? -1 : 1;
+      }
+
+      if (!aIsActive && !bIsActive) {
+        return a.index - b.index;
+      }
+
       const aInitiative = a.combatant.initiative ?? -Infinity;
       const bInitiative = b.combatant.initiative ?? -Infinity;
 

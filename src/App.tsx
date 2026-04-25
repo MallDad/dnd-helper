@@ -3,52 +3,19 @@ import { DEFAULT_CONDITIONS_2024 } from "./conditions";
 import {
   createEmptyEncounter,
   latestActionByCombatantForRound,
-  makeNpcCombatants,
   sortCombatantsForTurnOrder
 } from "./encounters";
 import { createId } from "./id";
 import { defaultState, loadState, saveState } from "./storage";
-import type { AppState, CombatantKind, Encounter, EncounterCombatant, PlayerCharacter, RollMode } from "./types";
-
-type PlayerForm = {
-  id?: string;
-  name: string;
-  initiativeModifier: string;
-  notes: string;
-};
-
-type NpcForm = {
-  name: string;
-  kind: CombatantKind;
-  count: string;
-  initiativeModifier: string;
-  rollMode: RollMode;
-  notes: string;
-};
-
-type DamageForm = {
-  combatantId: string;
-  amount: string;
-};
-
-const emptyPlayerForm: PlayerForm = {
-  name: "",
-  initiativeModifier: "0",
-  notes: ""
-};
-
-const emptyNpcForm: NpcForm = {
-  name: "",
-  kind: "monster",
-  count: "1",
-  initiativeModifier: "0",
-  rollMode: "per-creature",
-  notes: ""
-};
+import type { AppState, CombatantKind, Encounter, EncounterCombatant } from "./types";
 
 function numberFromInput(value: string, fallback = 0): number {
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : fallback;
+}
+
+function clampHpToMax(hp: number, maxHp: number): number {
+  return Math.min(Math.max(0, hp), Math.max(0, maxHp));
 }
 
 function updateEncounter(state: AppState, updater: (encounter: Encounter) => Encounter): AppState {
@@ -69,21 +36,16 @@ function App() {
 
     return loadState();
   });
-  const [playerForm, setPlayerForm] = useState<PlayerForm>(emptyPlayerForm);
-  const [npcForm, setNpcForm] = useState<NpcForm>(emptyNpcForm);
   const [actionText, setActionText] = useState("");
   const [isActionToolOpen, setIsActionToolOpen] = useState(false);
-  const [activeDialog, setActiveDialog] = useState<"damage" | null>(null);
-  const [isPlayerFormOpen, setIsPlayerFormOpen] = useState(false);
-  const [isNpcFormOpen, setIsNpcFormOpen] = useState(false);
-  const [damageForm, setDamageForm] = useState<DamageForm>({
-    combatantId: "",
-    amount: ""
-  });
   const [isConditionToolOpen, setIsConditionToolOpen] = useState(false);
   const [conditionSearch, setConditionSearch] = useState("");
   const [chosenConditionName, setChosenConditionName] = useState("");
   const [selectedConditionTargets, setSelectedConditionTargets] = useState<string[]>([]);
+  const [isDamageToolOpen, setIsDamageToolOpen] = useState(false);
+  const [isDamageTargeting, setIsDamageTargeting] = useState(false);
+  const [damageAmount, setDamageAmount] = useState("");
+  const [selectedDamageTargets, setSelectedDamageTargets] = useState<string[]>([]);
   const [editableNameIds, setEditableNameIds] = useState<string[]>([]);
   const [editableTypeIds, setEditableTypeIds] = useState<string[]>([]);
   const [isCombatantEditMode, setIsCombatantEditMode] = useState(false);
@@ -117,79 +79,23 @@ function App() {
     )
     : DEFAULT_CONDITIONS_2024;
   const selectedConditionName = chosenConditionName.trim();
+  const selectedDamageAmount = damageAmount.trim();
   function commitState(nextState: AppState) {
     setState(nextState);
   }
 
-  function handleSavePlayer(event: FormEvent) {
-    event.preventDefault();
-    const name = playerForm.name.trim();
-
-    if (!name) {
-      return;
-    }
-
-    const player: PlayerCharacter = {
-      id: playerForm.id ?? createId("player"),
-      name,
-      initiativeModifier: numberFromInput(playerForm.initiativeModifier),
-      maxHp: state.party.find((item) => item.id === playerForm.id)?.maxHp ?? 0,
-      notes: playerForm.notes.trim() || undefined
-    };
-
-    commitState({
-      ...state,
-      party: playerForm.id
-        ? state.party.map((item) => (item.id === player.id ? player : item))
-        : [...state.party, player],
-      encounter: state.encounter.combatants.some((combatant) => combatant.id === player.id)
-        ? state.encounter
-        : {
-          ...state.encounter,
-          combatants: [
-            ...state.encounter.combatants,
-            {
-              id: player.id,
-              name: player.name,
-              kind: "player",
-              active: true,
-              initiativeModifier: player.initiativeModifier,
-              initiative: null,
-              hp: 0,
-              maxHp: player.maxHp ?? 0,
-              tempHp: 0,
-              conditions: [],
-              notes: player.notes
-            }
-          ],
-          updatedAt: new Date().toISOString()
-        }
-    });
-    setPlayerForm(emptyPlayerForm);
+  function clearConditionTool() {
+    setConditionSearch("");
+    setChosenConditionName("");
+    setSelectedConditionTargets([]);
+    setIsConditionToolOpen(false);
   }
 
-  function handleAddNpc(event: FormEvent) {
-    event.preventDefault();
-    const name = npcForm.name.trim();
-
-    if (!name) {
-      return;
-    }
-
-    const combatants = makeNpcCombatants({
-      name,
-      kind: npcForm.kind === "npc" ? "npc" : "monster",
-      count: numberFromInput(npcForm.count, 1),
-      initiativeModifier: numberFromInput(npcForm.initiativeModifier),
-      rollMode: npcForm.rollMode,
-      notes: npcForm.notes
-    });
-
-    commitState(updateEncounter(state, (encounter) => ({
-      ...encounter,
-      combatants: [...encounter.combatants, ...combatants]
-    })));
-    setNpcForm(emptyNpcForm);
+  function clearDamageTool() {
+    setDamageAmount("");
+    setSelectedDamageTargets([]);
+    setIsDamageTargeting(false);
+    setIsDamageToolOpen(false);
   }
 
   function updateCombatant(id: string, updates: Partial<EncounterCombatant>) {
@@ -240,9 +146,30 @@ function App() {
 
   function updateCombatantActive(id: string, active: boolean) {
     commitState(updateEncounter(state, (encounter) => {
-      const combatants = encounter.combatants.map((combatant) =>
-        combatant.id === id ? { ...combatant, active } : combatant
-      );
+      const currentIndex = encounter.combatants.findIndex((combatant) => combatant.id === id);
+
+      if (currentIndex < 0) {
+        return encounter;
+      }
+
+      const currentCombatant = encounter.combatants[currentIndex];
+      const remainingCombatants = encounter.combatants.filter((combatant) => combatant.id !== id);
+      const updatedCombatant = { ...currentCombatant, active };
+      let insertAt = remainingCombatants.length;
+
+      if (active) {
+        const firstInactiveIndex = remainingCombatants.findIndex((combatant) => combatant.active === false);
+        insertAt = firstInactiveIndex >= 0 ? firstInactiveIndex : remainingCombatants.length;
+      } else {
+        const lastActiveIndex = remainingCombatants.reduce(
+          (lastIndex, combatant, index) => combatant.active !== false ? index : lastIndex,
+          -1
+        );
+        insertAt = lastActiveIndex + 1;
+      }
+
+      const combatants = [...remainingCombatants];
+      combatants.splice(insertAt, 0, updatedCombatant);
       const nextActiveCount = combatants.filter((combatant) => combatant.active !== false).length;
 
       return {
@@ -264,7 +191,7 @@ function App() {
     }, (encounter) => ({
       ...encounter,
       combatants: encounter.combatants.map((item) =>
-        item.id === combatant.id ? { ...item, maxHp } : item
+        item.id === combatant.id ? { ...item, maxHp, hp: clampHpToMax(item.hp ?? 0, maxHp) } : item
       )
     })));
   }
@@ -275,7 +202,8 @@ function App() {
   }
 
   function updateCombatantHp(id: string, value: string) {
-    const hp = Math.max(0, numberFromInput(value));
+    const combatant = state.encounter.combatants.find((item) => item.id === id);
+    const hp = clampHpToMax(numberFromInput(value), combatant?.maxHp ?? 0);
     updateCombatant(id, { hp });
   }
 
@@ -352,22 +280,6 @@ function App() {
     setEditableNameIds((current) => current.filter((editableId) => editableId !== id));
     setEditableTypeIds((current) => current.filter((editableId) => editableId !== id));
     setArmedDeleteId(null);
-  }
-
-  function startEncounter() {
-    commitState(updateEncounter(state, (encounter) => ({
-      ...encounter,
-      status: "active",
-      round: Math.max(encounter.round, 1),
-      currentTurnIndex: 0
-    })));
-  }
-
-  function endEncounter() {
-    commitState(updateEncounter(state, (encounter) => ({
-      ...encounter,
-      status: "complete"
-    })));
   }
 
   function newEncounter() {
@@ -536,18 +448,6 @@ function App() {
     setIsActionToolOpen(true);
   }
 
-  function openDamageDialog(combatantId: string) {
-    setDamageForm({
-      combatantId,
-      amount: ""
-    });
-    setActiveDialog("damage");
-  }
-
-  function selectedDamageCombatant() {
-    return state.encounter.combatants.find((combatant) => combatant.id === damageForm.combatantId);
-  }
-
   function hp(combatant: EncounterCombatant) {
     return combatant.hp ?? 0;
   }
@@ -560,55 +460,50 @@ function App() {
     return Math.max(0, combatant.tempHp ?? 0);
   }
 
-  function applyDamage(event: FormEvent) {
-    event.preventDefault();
-    const combatant = selectedDamageCombatant();
-
-    if (!combatant) {
+  function toggleDamageTool() {
+    if (isDamageToolOpen) {
+      clearDamageTool();
       return;
     }
 
-    const damage = Math.max(0, Math.floor(numberFromInput(damageForm.amount)));
-    updateCombatant(combatant.id, {
-      hp: Math.max(0, hp(combatant) - damage)
-    });
-    setDamageForm({ combatantId: "", amount: "" });
-    setActiveDialog(null);
+    clearConditionTool();
+    setDamageAmount("");
+    setSelectedDamageTargets([]);
+    setIsDamageTargeting(false);
+    setIsDamageToolOpen(true);
   }
 
-  function markDead() {
-    const combatant = selectedDamageCombatant();
+  function handleDamageAmountChange(event: ChangeEvent<HTMLInputElement>) {
+    setDamageAmount(event.target.value.replace(/[^\d]/g, ""));
+  }
 
-    if (!combatant) {
+  function handleDamageAmountKeyDown(event: KeyboardEvent<HTMLInputElement>) {
+    if (event.key === "Escape") {
+      event.preventDefault();
+      clearDamageTool();
       return;
     }
 
-    updateCombatant(combatant.id, {
-      hp: 0
-    });
-    setDamageForm({ combatantId: "", amount: "" });
-    setActiveDialog(null);
+    if (event.key === "Tab" && Math.floor(numberFromInput(selectedDamageAmount)) > 0) {
+      event.preventDefault();
+      setIsDamageTargeting(true);
+    }
   }
 
   function toggleConditionTool() {
-    setIsConditionToolOpen((isOpen) => {
-      if (isOpen) {
-        setConditionSearch("");
-        setChosenConditionName("");
-        setSelectedConditionTargets([]);
-      }
+    if (isConditionToolOpen) {
+      clearConditionTool();
+      return;
+    }
 
-      return !isOpen;
-    });
+    clearDamageTool();
+    setIsConditionToolOpen(true);
   }
 
   function handleConditionSearchKeyDown(event: KeyboardEvent<HTMLInputElement>) {
     if (event.key === "Escape") {
       event.preventDefault();
-      setConditionSearch("");
-      setChosenConditionName("");
-      setSelectedConditionTargets([]);
-      setIsConditionToolOpen(false);
+      clearConditionTool();
       return;
     }
 
@@ -638,10 +533,7 @@ function App() {
   function handleChosenConditionKeyDown(event: KeyboardEvent<HTMLButtonElement>) {
     if (event.key === "Escape") {
       event.preventDefault();
-      setConditionSearch("");
-      setChosenConditionName("");
-      setSelectedConditionTargets([]);
-      setIsConditionToolOpen(false);
+      clearConditionTool();
     }
   }
 
@@ -651,6 +543,24 @@ function App() {
     }
 
     setSelectedConditionTargets((targetIds) =>
+      targetIds.includes(combatantId)
+        ? targetIds.filter((targetId) => targetId !== combatantId)
+        : [...targetIds, combatantId]
+    );
+  }
+
+  function toggleDamageTarget(combatantId: string) {
+    if (!isDamageToolOpen || !isDamageTargeting) {
+      return;
+    }
+
+    const combatant = activeCombatants.find((item) => item.id === combatantId);
+
+    if (!combatant || hp(combatant) <= 0) {
+      return;
+    }
+
+    setSelectedDamageTargets((targetIds) =>
       targetIds.includes(combatantId)
         ? targetIds.filter((targetId) => targetId !== combatantId)
         : [...targetIds, combatantId]
@@ -681,10 +591,41 @@ function App() {
           : combatant
       )
     })));
-    setConditionSearch("");
-    setChosenConditionName("");
-    setSelectedConditionTargets([]);
-    setIsConditionToolOpen(false);
+    clearConditionTool();
+  }
+
+  function applyDamageToTargets() {
+    const damage = Math.max(0, Math.floor(numberFromInput(selectedDamageAmount)));
+
+    if (damage <= 0 || selectedDamageTargets.length === 0) {
+      return;
+    }
+
+    commitState(updateEncounter(state, (encounter) => ({
+      ...encounter,
+      combatants: encounter.combatants.map((combatant) => {
+        if (!selectedDamageTargets.includes(combatant.id) || hp(combatant) <= 0) {
+          return combatant;
+        }
+
+        const currentTempHp = tempHp(combatant);
+        const tempHpAfterDamage = Math.max(0, currentTempHp - damage);
+        const remainingDamage = Math.max(0, damage - currentTempHp);
+        const hpAfterDamage = Math.max(0, hp(combatant) - remainingDamage);
+        const hasUnconscious = combatant.conditions.some((condition) => condition.name === "Unconscious");
+
+        return {
+          ...combatant,
+          tempHp: tempHpAfterDamage,
+          hp: hpAfterDamage,
+          conditions:
+            hpAfterDamage === 0 && !hasUnconscious
+              ? [...combatant.conditions, { id: createId("condition"), name: "Unconscious" }]
+              : combatant.conditions
+        };
+      })
+    })));
+    clearDamageTool();
   }
 
   return (
@@ -705,127 +646,7 @@ function App() {
         <section className="panel setup-panel" aria-labelledby="setup-heading">
           <div className="panel-heading">
             <h2 id="setup-heading">Encounter Setup</h2>
-            <input
-              aria-label="Encounter name"
-              className="encounter-name"
-              value={state.encounter.name}
-              onChange={(event) => commitState(updateEncounter(state, (encounter) => ({ ...encounter, name: event.target.value })))}
-            />
           </div>
-
-          <button
-            type="button"
-            className="secondary section-add-toggle"
-            aria-expanded={isPlayerFormOpen}
-            onClick={() => setIsPlayerFormOpen((isOpen) => !isOpen)}
-          >
-            Add Player
-          </button>
-
-          {isPlayerFormOpen ? (
-            <form className="stacked-form" onSubmit={handleSavePlayer}>
-              <label>
-                Player name
-                <input
-                  value={playerForm.name}
-                  onChange={(event) => setPlayerForm({ ...playerForm, name: event.target.value })}
-                  placeholder="Mira"
-                />
-              </label>
-              <label>
-                Player initiative modifier
-                <input
-                  type="number"
-                  value={playerForm.initiativeModifier}
-                  onChange={(event) => setPlayerForm({ ...playerForm, initiativeModifier: event.target.value })}
-                />
-              </label>
-              <label>
-                Notes
-                <textarea
-                  value={playerForm.notes}
-                  onChange={(event) => setPlayerForm({ ...playerForm, notes: event.target.value })}
-                  placeholder="Optional table notes"
-                />
-              </label>
-              <div className="button-row">
-                <button type="submit">{playerForm.id ? "Update Player" : "Save Player"}</button>
-                {playerForm.id ? (
-                  <button type="button" className="secondary" onClick={() => setPlayerForm(emptyPlayerForm)}>
-                    Cancel
-                  </button>
-                ) : null}
-              </div>
-            </form>
-          ) : null}
-
-          <button
-            type="button"
-            className="secondary section-add-toggle"
-            aria-expanded={isNpcFormOpen}
-            onClick={() => setIsNpcFormOpen((isOpen) => !isOpen)}
-          >
-            Add NPC/Monster
-          </button>
-
-          {isNpcFormOpen ? (
-            <form className="npc-grid" onSubmit={handleAddNpc}>
-              <label>
-                NPC or monster
-                <input
-                  value={npcForm.name}
-                  onChange={(event) => setNpcForm({ ...npcForm, name: event.target.value })}
-                  placeholder="Goblin"
-                />
-              </label>
-              <label>
-                Type
-                <select
-                  value={npcForm.kind}
-                  onChange={(event) => setNpcForm({ ...npcForm, kind: event.target.value as CombatantKind })}
-                >
-                  <option value="monster">Monster</option>
-                  <option value="npc">NPC</option>
-                </select>
-              </label>
-              <label>
-                Count
-                <input
-                  type="number"
-                  min="1"
-                  value={npcForm.count}
-                  onChange={(event) => setNpcForm({ ...npcForm, count: event.target.value })}
-                />
-              </label>
-              <label>
-                NPC initiative modifier
-                <input
-                  type="number"
-                  value={npcForm.initiativeModifier}
-                  onChange={(event) => setNpcForm({ ...npcForm, initiativeModifier: event.target.value })}
-                />
-              </label>
-              <label>
-                Roll initiative
-                <select
-                  value={npcForm.rollMode}
-                  onChange={(event) => setNpcForm({ ...npcForm, rollMode: event.target.value as RollMode })}
-                >
-                  <option value="per-creature">Per creature</option>
-                  <option value="grouped">By monster type</option>
-                </select>
-              </label>
-              <label>
-                Notes
-                <input
-                  value={npcForm.notes}
-                  onChange={(event) => setNpcForm({ ...npcForm, notes: event.target.value })}
-                  placeholder="Optional"
-                />
-              </label>
-              <button type="submit">Add NPCs</button>
-            </form>
-          ) : null}
 
           <div className="compact-table-wrap">
             <table className="compact-table">
@@ -843,7 +664,7 @@ function App() {
               <tbody>
                 {state.encounter.combatants.length === 0 ? (
                   <tr>
-                    <td colSpan={7} className="empty">Add players and monsters to build the encounter.</td>
+                    <td colSpan={7} className="empty">Add combatants to build the encounter.</td>
                   </tr>
                 ) : null}
                 {orderedCombatants.map((combatant) => {
@@ -996,15 +817,6 @@ function App() {
           </div>
 
           <div className="button-row encounter-controls">
-            {state.encounter.status !== "active" ? (
-              <button type="button" onClick={startEncounter} disabled={activeCombatants.length === 0}>
-                Start Combat
-              </button>
-            ) : (
-              <button type="button" className="danger" onClick={endEncounter}>
-                End Combat
-              </button>
-            )}
             <button type="button" className="secondary" onClick={newEncounter}>
               New Encounter
             </button>
@@ -1020,7 +832,6 @@ function App() {
         <section className="panel combat-panel" aria-labelledby="combat-heading">
           <div className="panel-heading">
             <h2 id="combat-heading">Combat Tracker</h2>
-            <span>{state.encounter.status}</span>
           </div>
 
           <div className="turn-controls">
@@ -1073,9 +884,31 @@ function App() {
                   </datalist>
                 </>
               )}
-              <button type="button" className="secondary" disabled>
-                Apply Damage
-              </button>
+              {!isDamageToolOpen ? (
+                <button type="button" className="secondary condition-tool-control" onClick={toggleDamageTool} disabled={activeCombatants.every((combatant) => hp(combatant) <= 0)}>
+                  Apply Damage
+                </button>
+              ) : !isDamageTargeting ? (
+                <input
+                  className="condition-tool-control condition-search-control"
+                  aria-label="Damage amount"
+                  value={damageAmount}
+                  onChange={handleDamageAmountChange}
+                  onKeyDown={handleDamageAmountKeyDown}
+                  placeholder="Damage"
+                  inputMode="numeric"
+                  autoFocus
+                />
+              ) : (
+                <button
+                  type="button"
+                  className={`condition-tool-control condition-apply-control${selectedDamageTargets.length > 0 ? " ready" : ""}`}
+                  onClick={applyDamageToTargets}
+                  disabled={selectedDamageTargets.length === 0 || Math.floor(numberFromInput(selectedDamageAmount)) <= 0}
+                >
+                  Apply {selectedDamageAmount} Damage
+                </button>
+              )}
             </div>
             <button type="button" className="secondary" onClick={previousTurn} disabled={activeCombatants.length === 0 || isAtEncounterStart}>
               Previous
@@ -1134,6 +967,8 @@ function App() {
               const additionalConditionCount = Math.max(combatant.conditions.length - 1, 0);
               const conditionTooltip = combatant.conditions.map((condition) => condition.name).join("\n");
               const isSelectedForCondition = selectedConditionTargets.includes(combatant.id);
+              const isSelectedForDamage = selectedDamageTargets.includes(combatant.id);
+              const isDamageSelectable = isDamageToolOpen && isDamageTargeting && hp(combatant) > 0;
 
               return (
                 <article
@@ -1142,28 +977,31 @@ function App() {
                     `turn-card-${combatant.kind}`,
                     isCurrent ? "current" : "",
                     hasActedThisRound ? "acted" : "",
-                    isConditionToolOpen ? "selectable" : "",
-                    isSelectedForCondition ? "selected" : ""
+                    isConditionToolOpen || isDamageSelectable ? "selectable" : "",
+                    isSelectedForCondition || isSelectedForDamage ? "selected" : "",
+                    isDamageToolOpen && isDamageTargeting && hp(combatant) <= 0 ? "unavailable" : ""
                   ].filter(Boolean).join(" ")}
                   key={combatant.id}
                   aria-label={`${combatant.name}, ${combatant.kind}, ${index + 1} in initiative order`}
-                  aria-selected={isConditionToolOpen ? isSelectedForCondition : undefined}
-                  onClick={() => toggleConditionTarget(combatant.id)}
+                  aria-selected={isConditionToolOpen ? isSelectedForCondition : isDamageToolOpen && isDamageTargeting ? isSelectedForDamage : undefined}
+                  onClick={() => {
+                    if (isConditionToolOpen) {
+                      toggleConditionTarget(combatant.id);
+                      return;
+                    }
+
+                    if (isDamageToolOpen && isDamageTargeting) {
+                      toggleDamageTarget(combatant.id);
+                    }
+                  }}
                 >
                   <strong>{combatant.name}</strong>
-                  <button
-                    type="button"
-                    className="turn-card-hp-row"
-                    onClick={(event) => {
-                      event.stopPropagation();
-                      openDamageDialog(combatant.id);
-                    }}
-                  >
+                  <div className="turn-card-hp-row">
                     {tempHp(combatant) > 0 ? (
                       <span className="turn-card-temp-hp">{tempHp(combatant)}</span>
                     ) : null}
                     <span className="turn-card-hp">{hp(combatant)}/{maxHp(combatant)}</span>
-                  </button>
+                  </div>
                   <p className="turn-card-action">
                     {previousRoundAction ? `Round ${previousRoundAction.round}: ${previousRoundAction.text}` : ""}
                   </p>
@@ -1205,46 +1043,6 @@ function App() {
           </div>
         </section>
       </section>
-
-      {activeDialog === "damage" ? (
-        <div className="dialog-backdrop" role="presentation">
-          <section className="dialog" role="dialog" aria-modal="true" aria-labelledby="damage-dialog-title">
-            <div className="dialog-heading">
-              <h2 id="damage-dialog-title">Apply Damage</h2>
-              <button type="button" className="secondary close-button" onClick={() => setActiveDialog(null)}>
-                Close
-              </button>
-            </div>
-            <form className="dialog-form" onSubmit={applyDamage}>
-              <p className="dialog-target">
-                {selectedDamageCombatant()
-                  ? `${selectedDamageCombatant()?.name} HP ${hp(selectedDamageCombatant() as EncounterCombatant)}/${maxHp(selectedDamageCombatant() as EncounterCombatant)}`
-                  : "No combatant selected"}
-              </p>
-              <label>
-                Damage taken
-                <input
-                  type="number"
-                  min="0"
-                  value={damageForm.amount}
-                  onChange={(event) => setDamageForm({ ...damageForm, amount: event.target.value })}
-                />
-              </label>
-              <div className="button-row">
-                <button type="submit" disabled={!selectedDamageCombatant() || !damageForm.amount.trim()}>
-                  Apply Damage
-                </button>
-                <button type="button" className="danger small-button" onClick={markDead} disabled={!selectedDamageCombatant()}>
-                  Dead
-                </button>
-                <button type="button" className="secondary" onClick={() => setActiveDialog(null)}>
-                  Cancel
-                </button>
-              </div>
-            </form>
-          </section>
-        </div>
-      ) : null}
     </main>
   );
 }

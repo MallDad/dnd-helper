@@ -4,7 +4,7 @@ import { loadState, saveState, STORAGE_KEY } from "./storage";
 import type { AppState } from "./types";
 
 describe("storage", () => {
-  it("saves and reloads the party and active encounter", () => {
+  it("saves and reloads the party and encounter", () => {
     const storage = new MemoryStorage();
     const encounter = createEmptyEncounter("Bridge Ambush");
     const state: AppState = {
@@ -17,7 +17,6 @@ describe("storage", () => {
       ],
       encounter: {
         ...encounter,
-        status: "active",
         combatants: [
           {
             id: "player-1",
@@ -37,18 +36,15 @@ describe("storage", () => {
 
     expect(loadState(storage)).toMatchObject({
       party: [{ id: "player-1", name: "Mira", initiativeModifier: 3 }],
-      encounter: { name: "Bridge Ambush", status: "active" }
+      encounter: { name: "Bridge Ambush" }
     });
   });
 
-  it("keeps the saved party when an encounter is complete", () => {
+  it("keeps the saved party across encounter saves", () => {
     const storage = new MemoryStorage();
     const state: AppState = {
       party: [{ id: "player-2", name: "Orrin", initiativeModifier: -1 }],
-      encounter: {
-        ...createEmptyEncounter("Done"),
-        status: "complete"
-      }
+      encounter: createEmptyEncounter("Done")
     };
 
     saveState(state, storage);

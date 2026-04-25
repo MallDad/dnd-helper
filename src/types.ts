@@ -42,7 +42,6 @@ export type CombatAction = {
 export type Encounter = {
   id: string;
   name: string;
-  status: "setup" | "active" | "complete";
   round: number;
   currentTurnIndex: number;
   combatants: EncounterCombatant[];

@@ -458,10 +458,6 @@ h3 {
   line-height: 1.4;
 }
 
-.encounter-name {
-  max-width: 220px;
-}
-
 .turn-controls {
   display: grid;
   grid-template-columns: auto auto minmax(0, 0.86fr) auto;
@@ -637,6 +633,10 @@ h3 {
   box-shadow: 0 0 0 3px #116b64 inset;
 }
 
+.turn-card.unavailable {
+  opacity: 0.6;
+}
+
 .turn-card strong {
   display: block;
   min-width: 0;
@@ -684,11 +684,11 @@ h3 {
   background: #fff1a6;
 }
 
-.turn-card-hp-row:hover:not(:disabled) .turn-card-hp {
+.turn-card.selectable:hover .turn-card-hp {
   background: #e8efec;
 }
 
-.turn-card-hp-row:hover:not(:disabled) .turn-card-temp-hp {
+.turn-card.selectable:hover .turn-card-temp-hp {
   background: #ffe66d;
 }
 
@@ -861,7 +861,4 @@ h3 {
     flex-direction: column;
   }
 
-  .encounter-name {
-    max-width: none;
-  }
 }
