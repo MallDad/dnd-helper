@@ -94,12 +94,6 @@ p {
   margin: 0;
 }
 
-h1 {
-  color: #ffffff;
-  font-size: 2.1rem;
-  line-height: 1.05;
-}
-
 h2 {
   font-size: 1.2rem;
 }
@@ -110,41 +104,7 @@ h3 {
 
 .app-shell {
   min-height: 100vh;
-}
-
-.app-header {
-  display: flex;
-  align-items: end;
-  justify-content: space-between;
-  gap: 1rem;
-  padding: 1.35rem clamp(1rem, 4vw, 2rem);
-  color: #ffffff;
-  background: #27302d;
-}
-
-.eyebrow {
-  margin-bottom: 0.25rem;
-  color: #9fd9cf;
-  font-size: 0.78rem;
-  font-weight: 800;
-  letter-spacing: 0;
-  text-transform: uppercase;
-}
-
-.header-status {
-  display: flex;
-  flex-wrap: wrap;
-  justify-content: end;
-  gap: 0.45rem;
-}
-
-.header-status span {
-  border: 1px solid #61706b;
-  border-radius: 999px;
-  padding: 0.4rem 0.65rem;
-  color: #f2f6f5;
-  background: #35403c;
-  font-size: 0.86rem;
+  padding-top: 0.9rem;
 }
 
 .workspace {
@@ -252,8 +212,9 @@ h3 {
 }
 
 .compact-table-heading-label {
-  display: block;
-  text-align: center;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   line-height: 1.1;
 }
 
@@ -262,11 +223,26 @@ h3 {
   padding-right: 0.18rem;
 }
 
+.compact-table-control-column {
+  text-align: center;
+}
+
+.compact-table th.compact-table-control-column {
+  text-align: center;
+}
+
 .compact-table-heading-cell .compact-table-heading-label {
-  display: flex;
-  align-items: center;
-  justify-content: center;
   width: 100%;
+}
+
+.compact-table-input-cell .compact-number-input {
+  display: block;
+  margin-left: auto;
+  margin-right: auto;
+}
+
+.compact-table-input-cell .initiative-cell {
+  justify-content: center;
 }
 
 .compact-table th:nth-child(1),
@@ -418,6 +394,10 @@ h3 {
   gap: 0.65rem;
 }
 
+.action-log {
+  gap: 0.35rem;
+}
+
 .list-item,
 .combatant-edit,
 .log-entry {
@@ -425,6 +405,22 @@ h3 {
   border-radius: 8px;
   padding: 0.75rem;
   background: #fbfcfc;
+}
+
+.log-entry {
+  display: flex;
+  align-items: baseline;
+  gap: 0.35rem;
+  min-width: 0;
+  border: 0;
+  border-radius: 0;
+  padding: 0;
+  background: transparent;
+  color: #3d4744;
+  font-size: 0.78rem;
+  line-height: 1.25;
+  white-space: nowrap;
+  overflow: hidden;
 }
 
 .list-item,
@@ -437,17 +433,16 @@ h3 {
 .list-item strong,
 .combatant-edit strong,
 .log-entry strong {
-  display: block;
   color: #202325;
+  flex: 0 0 auto;
+  font-size: inherit;
 }
 
 .list-item span,
 .combatant-edit span,
 .log-entry span {
-  display: block;
   color: #65716d;
   font-size: 0.86rem;
-  text-transform: capitalize;
 }
 
 .list-item p,
@@ -456,6 +451,32 @@ h3 {
   margin-top: 0.35rem;
   color: #46514d;
   line-height: 1.4;
+}
+
+.list-item span,
+.combatant-edit span {
+  display: block;
+  text-transform: capitalize;
+}
+
+.log-entry-round,
+.log-entry-separator,
+.log-entry-name {
+  flex: 0 0 auto;
+  color: #576360;
+}
+
+.log-entry-text {
+  min-width: 0;
+  color: #3d4744;
+  font-size: inherit;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.log-entry-system {
+  color: #576360;
+  font-weight: 700;
 }
 
 .turn-controls {
@@ -478,9 +499,21 @@ h3 {
   font-size: 0.86rem;
 }
 
+.current-turn-panel {
+  display: grid;
+  gap: 0.4rem;
+  align-content: start;
+}
+
 .action-tool-control {
   width: 12.5rem;
   max-width: 12.5rem;
+}
+
+.current-action-control {
+  width: 100%;
+  max-width: 100%;
+  justify-self: stretch;
 }
 
 .action-search-control {
@@ -537,6 +570,13 @@ h3 {
   gap: 0.45rem;
 }
 
+.status-hp-row {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  flex: 0 0 auto;
+}
+
 .status-heading strong {
   min-width: 0;
   flex: 1 1 auto;
@@ -561,27 +601,32 @@ h3 {
   background: #ffffff;
 }
 
-.status-details {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 0.4rem 0.55rem;
-  color: #314642;
-}
-
-.status-temp-hp {
-  border: 1px solid #c9a329;
-  border-radius: 7px;
-  padding: 0.22rem 0.45rem;
+.status-heading .status-temp-hp {
   color: #202325;
   background: #fff1a6;
-  font-size: 0.8rem;
+  border: 1px solid #c9a329;
+  border-radius: 7px;
+  padding: 0.22rem 0.5rem;
+  font-size: 0.78rem;
   font-weight: 900;
+}
+
+.status-details {
+  display: grid;
+  grid-template-rows: 1.1rem auto;
+  align-content: start;
+  gap: 0.4rem;
+  color: #314642;
 }
 
 .status-details .latest-action {
   margin-top: 0;
   font-size: 0.88rem;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 1;
+  overflow: hidden;
+  min-width: 0;
 }
 
 .turn-order {
@@ -593,9 +638,9 @@ h3 {
 
 .turn-card {
   display: grid;
-  grid-template-rows: auto 1.75rem minmax(1.35rem, 1fr) 1.7rem;
+  grid-template-rows: auto 1.75rem minmax(1.35rem, 1fr) 3.42rem;
   gap: 0.3rem;
-  height: 140px;
+  height: 168px;
   min-width: 0;
   border: 2px solid #d7e1dc;
   border-radius: 8px;
@@ -697,24 +742,29 @@ h3 {
   color: #46514d;
   font-size: 0.78rem;
   line-height: 1.25;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
   overflow: hidden;
 }
 
 .turn-card-conditions {
   display: flex;
-  align-items: end;
-  gap: 0.3rem;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 0.22rem;
   min-width: 0;
 }
 
-.turn-card-condition,
-.turn-card-more {
+.turn-card-condition {
   display: inline-flex;
   align-items: center;
-  min-height: 24px;
+  justify-content: space-between;
+  min-height: 28px;
+  width: 100%;
   border: 1px solid #be8b30;
   border-radius: 7px;
-  padding: 0.12rem 0.4rem;
+  padding: 0.12rem 0.18rem 0.12rem 0.45rem;
   color: #202325;
   background: #ffe1a8;
   font-size: 0.76rem;
@@ -723,15 +773,17 @@ h3 {
 
 .turn-card-condition {
   min-width: 0;
+}
+
+.turn-card-condition-name {
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.turn-card-more {
+.turn-card-chip-remove {
   flex: 0 0 auto;
-  color: #ffffff;
-  background: #8a5d15;
 }
 
 .condition-chips {
@@ -742,6 +794,7 @@ h3 {
 
 .status-condition-chips {
   min-height: 28px;
+  align-content: start;
 }
 
 .condition-chip {
@@ -841,15 +894,6 @@ h3 {
 }
 
 @media (max-width: 760px) {
-  .app-header {
-    align-items: start;
-    flex-direction: column;
-  }
-
-  .header-status {
-    justify-content: start;
-  }
-
   .workspace,
   .npc-grid,
   .turn-controls {

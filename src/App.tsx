@@ -18,6 +18,109 @@ function clampHpToMax(hp: number, maxHp: number): number {
   return Math.min(Math.max(0, hp), Math.max(0, maxHp));
 }
 
+const EXHAUSTION_NAMES = [
+  "Exhaustion",
+  "Exhaustion 2",
+  "Exhaustion 3",
+  "Exhaustion 4",
+  "Exhaustion 5"
+] as const;
+
+const DIED_OF_EXHAUSTION = "Died of Exhaustion";
+
+function exhaustionLevelIndex(name: string): number {
+  return EXHAUSTION_NAMES.findIndex((conditionName) => conditionName === name);
+}
+
+function applyConditionName(existingConditions: EncounterCombatant["conditions"], conditionName: string) {
+  if (conditionName === "Exhaustion") {
+    const exhaustionCondition = existingConditions.find((condition) =>
+      exhaustionLevelIndex(condition.name) >= 0 || condition.name === DIED_OF_EXHAUSTION
+    );
+
+    if (!exhaustionCondition) {
+      return [
+        ...existingConditions,
+        {
+          id: createId("condition"),
+          name: "Exhaustion"
+        }
+      ];
+    }
+
+    if (exhaustionCondition.name === DIED_OF_EXHAUSTION) {
+      return existingConditions;
+    }
+
+    const currentLevel = exhaustionLevelIndex(exhaustionCondition.name);
+    const nextName = currentLevel >= EXHAUSTION_NAMES.length - 1 ? DIED_OF_EXHAUSTION : EXHAUSTION_NAMES[currentLevel + 1];
+
+    return existingConditions.map((condition) =>
+      condition.id === exhaustionCondition.id ? { ...condition, name: nextName } : condition
+    );
+  }
+
+  if (existingConditions.some((condition) => condition.name === conditionName)) {
+    return existingConditions;
+  }
+
+  return [
+    ...existingConditions,
+    {
+      id: createId("condition"),
+      name: conditionName
+    }
+  ];
+}
+
+function removeConditionEntry(existingConditions: EncounterCombatant["conditions"], conditionId: string) {
+  const targetCondition = existingConditions.find((condition) => condition.id === conditionId);
+
+  if (!targetCondition) {
+    return existingConditions;
+  }
+
+  if (targetCondition.name === DIED_OF_EXHAUSTION) {
+    return existingConditions.map((condition) =>
+      condition.id === conditionId ? { ...condition, name: "Exhaustion 5" } : condition
+    );
+  }
+
+  const level = exhaustionLevelIndex(targetCondition.name);
+
+  if (level > 0) {
+    return existingConditions.map((condition) =>
+      condition.id === conditionId ? { ...condition, name: EXHAUSTION_NAMES[level - 1] } : condition
+    );
+  }
+
+  if (level === 0) {
+    return existingConditions.filter((condition) => condition.id !== conditionId);
+  }
+
+  return existingConditions.filter((condition) => condition.id !== conditionId);
+}
+
+function removeOneExhaustionStep(existingConditions: EncounterCombatant["conditions"]) {
+  const exhaustionCondition = existingConditions.find((condition) =>
+    exhaustionLevelIndex(condition.name) >= 0 || condition.name === DIED_OF_EXHAUSTION
+  );
+
+  if (!exhaustionCondition) {
+    return existingConditions;
+  }
+
+  return removeConditionEntry(existingConditions, exhaustionCondition.id);
+}
+
+function clearConditionsExceptExhaustion(existingConditions: EncounterCombatant["conditions"]) {
+  const exhaustionCondition = existingConditions.find((condition) =>
+    exhaustionLevelIndex(condition.name) >= 0 || condition.name === DIED_OF_EXHAUSTION
+  );
+
+  return exhaustionCondition ? removeOneExhaustionStep([exhaustionCondition]) : [];
+}
+
 function updateEncounter(state: AppState, updater: (encounter: Encounter) => Encounter): AppState {
   return {
     ...state,
@@ -25,6 +128,32 @@ function updateEncounter(state: AppState, updater: (encounter: Encounter) => Enc
       ...updater(state.encounter),
       updatedAt: new Date().toISOString()
     }
+  };
+}
+
+function actionSummaryForRound(encounter: Encounter, combatantId: string) {
+  const actionThisRound = latestActionByCombatantForRound(encounter, combatantId, encounter.round);
+
+  if (actionThisRound) {
+    return `This round: ${actionThisRound.text}`;
+  }
+
+  if (encounter.round <= 1) {
+    return null;
+  }
+
+  const actionLastRound = latestActionByCombatantForRound(encounter, combatantId, encounter.round - 1);
+  return actionLastRound ? `Last round: ${actionLastRound.text}` : null;
+}
+
+function createRoundLogEntry(round: number) {
+  return {
+    id: createId("action"),
+    round,
+    combatantId: "",
+    combatantName: "",
+    text: `Round ${round}`,
+    createdAt: new Date().toISOString()
   };
 }
 
@@ -46,6 +175,10 @@ function App() {
   const [isDamageTargeting, setIsDamageTargeting] = useState(false);
   const [damageAmount, setDamageAmount] = useState("");
   const [selectedDamageTargets, setSelectedDamageTargets] = useState<string[]>([]);
+  const [isHealingToolOpen, setIsHealingToolOpen] = useState(false);
+  const [isHealingTargeting, setIsHealingTargeting] = useState(false);
+  const [healingAmount, setHealingAmount] = useState("");
+  const [selectedHealingTargets, setSelectedHealingTargets] = useState<string[]>([]);
   const [editableNameIds, setEditableNameIds] = useState<string[]>([]);
   const [editableTypeIds, setEditableTypeIds] = useState<string[]>([]);
   const [isCombatantEditMode, setIsCombatantEditMode] = useState(false);
@@ -68,9 +201,8 @@ function App() {
     ? activeCombatants.findIndex((combatant) => combatant.id === currentCombatant.id) + 1
     : 0;
   const isAtEncounterStart = state.encounter.round <= 1 && state.encounter.currentTurnIndex <= 0;
-  const previousRound = state.encounter.round - 1;
   const currentLatestAction = currentCombatant
-    ? latestActionByCombatantForRound(state.encounter, currentCombatant.id, previousRound)
+    ? actionSummaryForRound(state.encounter, currentCombatant.id)
     : null;
   const trimmedConditionSearch = conditionSearch.trim();
   const conditionMatches = trimmedConditionSearch
@@ -80,6 +212,7 @@ function App() {
     : DEFAULT_CONDITIONS_2024;
   const selectedConditionName = chosenConditionName.trim();
   const selectedDamageAmount = damageAmount.trim();
+  const selectedHealingAmount = healingAmount.trim();
   function commitState(nextState: AppState) {
     setState(nextState);
   }
@@ -96,6 +229,13 @@ function App() {
     setSelectedDamageTargets([]);
     setIsDamageTargeting(false);
     setIsDamageToolOpen(false);
+  }
+
+  function clearHealingTool() {
+    setHealingAmount("");
+    setSelectedHealingTargets([]);
+    setIsHealingTargeting(false);
+    setIsHealingToolOpen(false);
   }
 
   function updateCombatant(id: string, updates: Partial<EncounterCombatant>) {
@@ -300,7 +440,7 @@ function App() {
       ...encounter,
       combatants: encounter.combatants.map((combatant) => ({
         ...combatant,
-        conditions: []
+        conditions: clearConditionsExceptExhaustion(combatant.conditions)
       }))
     })));
   }
@@ -311,7 +451,8 @@ function App() {
       combatants: encounter.combatants.map((combatant) => ({
         ...combatant,
         hp: combatant.maxHp ?? 0,
-        tempHp: 0
+        tempHp: 0,
+        conditions: removeOneExhaustionStep(combatant.conditions)
       }))
     })));
   }
@@ -325,10 +466,13 @@ function App() {
       const nextIndex = encounter.currentTurnIndex + 1;
 
       if (nextIndex >= activeCombatants.length) {
+        const nextRound = encounter.round + 1;
+
         return {
           ...encounter,
           currentTurnIndex: 0,
-          round: encounter.round + 1
+          round: nextRound,
+          actionLog: [...encounter.actionLog, createRoundLogEntry(nextRound)]
         };
       }
 
@@ -411,7 +555,7 @@ function App() {
     }
 
     updateCombatant(combatantId, {
-      conditions: combatant.conditions.filter((condition) => condition.id !== conditionId)
+      conditions: removeConditionEntry(combatant.conditions, conditionId)
     });
   }
 
@@ -439,6 +583,7 @@ function App() {
     }
 
     clearConditionTool();
+    clearHealingTool();
     setDamageAmount("");
     setSelectedDamageTargets([]);
     setIsDamageTargeting(false);
@@ -462,6 +607,49 @@ function App() {
     }
   }
 
+  function handleDamageAmountBlur() {
+    if (!isDamageTargeting && Math.floor(numberFromInput(selectedDamageAmount)) <= 0) {
+      clearDamageTool();
+    }
+  }
+
+  function toggleHealingTool() {
+    if (isHealingToolOpen) {
+      clearHealingTool();
+      return;
+    }
+
+    clearConditionTool();
+    clearDamageTool();
+    setHealingAmount("");
+    setSelectedHealingTargets([]);
+    setIsHealingTargeting(false);
+    setIsHealingToolOpen(true);
+  }
+
+  function handleHealingAmountChange(event: ChangeEvent<HTMLInputElement>) {
+    setHealingAmount(event.target.value.replace(/[^\d]/g, ""));
+  }
+
+  function handleHealingAmountKeyDown(event: KeyboardEvent<HTMLInputElement>) {
+    if (event.key === "Escape") {
+      event.preventDefault();
+      clearHealingTool();
+      return;
+    }
+
+    if (event.key === "Tab" && Math.floor(numberFromInput(selectedHealingAmount)) > 0) {
+      event.preventDefault();
+      setIsHealingTargeting(true);
+    }
+  }
+
+  function handleHealingAmountBlur() {
+    if (!isHealingTargeting && Math.floor(numberFromInput(selectedHealingAmount)) <= 0) {
+      clearHealingTool();
+    }
+  }
+
   function toggleConditionTool() {
     if (isConditionToolOpen) {
       clearConditionTool();
@@ -469,6 +657,7 @@ function App() {
     }
 
     clearDamageTool();
+    clearHealingTool();
     setIsConditionToolOpen(true);
   }
 
@@ -539,6 +728,24 @@ function App() {
     );
   }
 
+  function toggleHealingTarget(combatantId: string) {
+    if (!isHealingToolOpen || !isHealingTargeting) {
+      return;
+    }
+
+    const combatant = activeCombatants.find((item) => item.id === combatantId);
+
+    if (!combatant || hp(combatant) >= maxHp(combatant)) {
+      return;
+    }
+
+    setSelectedHealingTargets((targetIds) =>
+      targetIds.includes(combatantId)
+        ? targetIds.filter((targetId) => targetId !== combatantId)
+        : [...targetIds, combatantId]
+    );
+  }
+
   function applyConditionToTargets() {
     const conditionName = selectedConditionName.trim();
 
@@ -552,13 +759,7 @@ function App() {
         selectedConditionTargets.includes(combatant.id)
           ? {
             ...combatant,
-            conditions: [
-              ...combatant.conditions,
-              {
-                id: createId("condition"),
-                name: conditionName
-              }
-            ]
+            conditions: applyConditionName(combatant.conditions, conditionName)
           }
           : combatant
       )
@@ -600,20 +801,31 @@ function App() {
     clearDamageTool();
   }
 
+  function applyHealingToTargets() {
+    const healing = Math.max(0, Math.floor(numberFromInput(selectedHealingAmount)));
+
+    if (healing <= 0 || selectedHealingTargets.length === 0) {
+      return;
+    }
+
+    commitState(updateEncounter(state, (encounter) => ({
+      ...encounter,
+      combatants: encounter.combatants.map((combatant) => {
+        if (!selectedHealingTargets.includes(combatant.id) || hp(combatant) >= maxHp(combatant)) {
+          return combatant;
+        }
+
+        return {
+          ...combatant,
+          hp: clampHpToMax(hp(combatant) + healing, maxHp(combatant))
+        };
+      })
+    })));
+    clearHealingTool();
+  }
+
   return (
     <main className="app-shell">
-      <header className="app-header">
-        <div>
-          <p className="eyebrow">Local DM tracker</p>
-          <h1>D&D Helper</h1>
-        </div>
-        <div className="header-status">
-          <span>{state.encounter.combatants.filter((combatant) => combatant.kind === "player").length} players</span>
-          <span>{state.encounter.combatants.length} combatants</span>
-          <span>Round {state.encounter.round}</span>
-        </div>
-      </header>
-
       <section className="workspace" aria-label="D&D helper workspace">
         <section className="panel setup-panel" aria-labelledby="setup-heading">
           <div className="panel-heading">
@@ -627,10 +839,10 @@ function App() {
                   <th>Name</th>
                   <th>Type</th>
                   <th>Active</th>
-                  <th><span className="compact-table-heading-label">Init</span></th>
-                  <th className="compact-table-heading-cell"><span className="compact-table-heading-label">HP</span></th>
-                  <th className="compact-table-heading-cell"><span className="compact-table-heading-label">Max<br />HP</span></th>
-                  <th className="compact-table-heading-cell"><span className="compact-table-heading-label">Temp HP</span></th>
+                  <th className="compact-table-heading-cell compact-table-control-column"><span className="compact-table-heading-label">Init</span></th>
+                  <th className="compact-table-heading-cell compact-table-control-column"><span className="compact-table-heading-label">HP</span></th>
+                  <th className="compact-table-heading-cell compact-table-control-column"><span className="compact-table-heading-label">Max<br />HP</span></th>
+                  <th className="compact-table-heading-cell compact-table-control-column"><span className="compact-table-heading-label">Temp HP</span></th>
                 </tr>
               </thead>
               <tbody>
@@ -711,7 +923,7 @@ function App() {
                           onChange={(event) => updateCombatantActive(combatant.id, event.target.checked)}
                         />
                       </td>
-                      <td>
+                      <td className="compact-table-control-column compact-table-input-cell">
                         <div className="initiative-cell">
                           {canMoveUpWithinInitiative ? (
                             <button
@@ -735,7 +947,7 @@ function App() {
                           />
                         </div>
                       </td>
-                      <td>
+                      <td className="compact-table-control-column compact-table-input-cell">
                         <input
                           className="compact-number-input compact-number-input-medium"
                           type="number"
@@ -746,7 +958,7 @@ function App() {
                           placeholder="0"
                         />
                       </td>
-                      <td>
+                      <td className="compact-table-control-column compact-table-input-cell">
                         <input
                           className="compact-number-input compact-number-input-medium"
                           type="number"
@@ -757,7 +969,7 @@ function App() {
                           placeholder="0"
                         />
                       </td>
-                      <td>
+                      <td className="compact-table-control-column compact-table-input-cell">
                         <input
                           className="compact-number-input compact-number-input-short"
                           type="number"
@@ -783,6 +995,7 @@ function App() {
               type="button"
               className={`secondary section-add-toggle${isCombatantEditMode ? " active-toggle" : ""}`}
               onClick={toggleCombatantEditMode}
+              title={"Change name(s)\nChange type\nDelete row"}
             >
               {isCombatantEditMode ? "Done Edits" : "Edit Combatants"}
             </button>
@@ -793,7 +1006,7 @@ function App() {
               type="button"
               className="secondary"
               onClick={newEncounter}
-              title={"Removes monsters\nClears initiative\nClears Encounter Log\nResets round tracking"}
+              title={"Removes monsters\nClears initiative\nClears Action Log\nResets round tracking"}
             >
               New Encounter
             </button>
@@ -802,11 +1015,17 @@ function App() {
               className="secondary"
               onClick={longRest}
               disabled={state.encounter.combatants.length === 0}
-              title={"Restores HP to Max HP\nClears Temp HP"}
+              title={"Restores HP to Max HP\nClears Temp HP\nDecreases Exhaustion 1 Step"}
             >
               Long Rest
             </button>
-            <button type="button" className="secondary" onClick={removeAllConditions} disabled={state.encounter.combatants.length === 0}>
+            <button
+              type="button"
+              className="secondary"
+              onClick={removeAllConditions}
+              disabled={state.encounter.combatants.length === 0}
+              title={"Removes all conditions\nDecreases Exhaustion 1 Step"}
+            >
               Remove All Conditions
             </button>
           </div>
@@ -814,28 +1033,51 @@ function App() {
 
         <section className="panel combat-panel" aria-labelledby="combat-heading">
           <div className="panel-heading">
-            <h2 id="combat-heading">Combat Tracker</h2>
+            <h2 id="combat-heading">Combat Tracker - Round {state.encounter.round}</h2>
           </div>
 
           <div className="turn-controls">
             <div className="turn-tool-buttons">
-              {!isActionToolOpen ? (
-                <button type="button" className="secondary action-tool-control" onClick={openActionTool} disabled={!currentCombatant}>
-                  Record Action
+              {!isDamageToolOpen ? (
+                <button
+                  type="button"
+                  className="secondary condition-tool-control"
+                  onClick={toggleDamageTool}
+                  disabled={activeCombatants.every((combatant) => hp(combatant) <= 0)}
+                  title={'Enter damage amount\nPress <Tab> to set\nSelect card(s)\nClick "Apply..."\nPress <Esc> to cancel'}
+                >
+                  Apply Damage
                 </button>
-              ) : (
+              ) : !isDamageTargeting ? (
                 <input
-                  className="action-tool-control action-search-control"
-                  aria-label="Action text"
-                  value={actionText}
-                  onChange={(event) => setActionText(event.target.value)}
-                  onKeyDown={handleActionTextKeyDown}
-                  placeholder="Action"
+                  className="condition-tool-control condition-search-control"
+                  aria-label="Damage amount"
+                  value={damageAmount}
+                  onChange={handleDamageAmountChange}
+                  onKeyDown={handleDamageAmountKeyDown}
+                  onBlur={handleDamageAmountBlur}
+                  placeholder="Damage amount"
+                  inputMode="numeric"
                   autoFocus
                 />
+              ) : (
+                <button
+                  type="button"
+                  className={`condition-tool-control condition-apply-control${selectedDamageTargets.length > 0 ? " ready" : ""}`}
+                  onClick={applyDamageToTargets}
+                  disabled={selectedDamageTargets.length === 0 || Math.floor(numberFromInput(selectedDamageAmount)) <= 0}
+                >
+                  Apply {selectedDamageAmount} Damage
+                </button>
               )}
               {!isConditionToolOpen ? (
-                <button type="button" className="secondary condition-tool-control" onClick={toggleConditionTool} disabled={activeCombatants.length === 0}>
+                <button
+                  type="button"
+                  className="secondary condition-tool-control"
+                  onClick={toggleConditionTool}
+                  disabled={activeCombatants.length === 0}
+                  title={'Enter or choose condition\nPress <Tab> to set\nSelect card(s)\nClick "Apply..."\nPress <Esc> to cancel'}
+                >
                   Apply Condition
                 </button>
               ) : selectedConditionName ? (
@@ -867,69 +1109,99 @@ function App() {
                   </datalist>
                 </>
               )}
-              {!isDamageToolOpen ? (
-                <button type="button" className="secondary condition-tool-control" onClick={toggleDamageTool} disabled={activeCombatants.every((combatant) => hp(combatant) <= 0)}>
-                  Apply Damage
+              {!isHealingToolOpen ? (
+                <button
+                  type="button"
+                  className="secondary condition-tool-control"
+                  onClick={toggleHealingTool}
+                  disabled={activeCombatants.every((combatant) => hp(combatant) >= maxHp(combatant))}
+                  title={'Enter healing amount\nPress <Tab> to set\nSelect card(s)\nClick "Apply..."\nPress <Esc> to cancel'}
+                >
+                  Apply Healing
                 </button>
-              ) : !isDamageTargeting ? (
+              ) : !isHealingTargeting ? (
                 <input
                   className="condition-tool-control condition-search-control"
-                  aria-label="Damage amount"
-                  value={damageAmount}
-                  onChange={handleDamageAmountChange}
-                  onKeyDown={handleDamageAmountKeyDown}
-                  placeholder="Damage"
+                  aria-label="Healing amount"
+                  value={healingAmount}
+                  onChange={handleHealingAmountChange}
+                  onKeyDown={handleHealingAmountKeyDown}
+                  onBlur={handleHealingAmountBlur}
+                  placeholder="Healing amount"
                   inputMode="numeric"
                   autoFocus
                 />
               ) : (
                 <button
                   type="button"
-                  className={`condition-tool-control condition-apply-control${selectedDamageTargets.length > 0 ? " ready" : ""}`}
-                  onClick={applyDamageToTargets}
-                  disabled={selectedDamageTargets.length === 0 || Math.floor(numberFromInput(selectedDamageAmount)) <= 0}
+                  className={`condition-tool-control condition-apply-control${selectedHealingTargets.length > 0 ? " ready" : ""}`}
+                  onClick={applyHealingToTargets}
+                  disabled={selectedHealingTargets.length === 0 || Math.floor(numberFromInput(selectedHealingAmount)) <= 0}
                 >
-                  Apply {selectedDamageAmount} Damage
+                  Apply {selectedHealingAmount} Healing
                 </button>
               )}
             </div>
             <button type="button" className="secondary" onClick={previousTurn} disabled={activeCombatants.length === 0 || isAtEncounterStart}>
               Previous
             </button>
-            <div className="current-status" aria-label="Current combatant status">
-              <div className="status-heading">
-                <strong>{currentCombatant?.name ?? "No combatants"}</strong>
-                <span className="status-hp">
-                  HP: {currentCombatant ? `${hp(currentCombatant)}/${maxHp(currentCombatant)}` : "0/0"}
-                </span>
-                <span>{currentCombatant ? `${currentOrderNumber}/${activeCombatants.length}` : "0/0"}</span>
-              </div>
-              <div className="status-details">
-                {currentLatestAction ? (
-                  <p className="latest-action">Round {currentLatestAction.round}: {currentLatestAction.text}</p>
-                ) : null}
-                <div className="condition-chips status-condition-chips" aria-label="Current conditions">
-                  {currentCombatant?.conditions.map((condition) => (
-                    <span
-                      className="condition-chip"
-                      key={condition.id}
-                      title={[condition.note, condition.expires].filter(Boolean).join(" - ")}
-                    >
-                      {condition.name}
-                      <button
-                        type="button"
-                        className="chip-remove"
-                        aria-label={`Remove ${condition.name} from ${currentCombatant.name}`}
-                        onClick={() => removeCondition(currentCombatant.id, condition.id)}
-                      >
-                        x
-                      </button>
+            <div className="current-turn-panel">
+              {!isActionToolOpen ? (
+                <button
+                  type="button"
+                  className="secondary action-tool-control current-action-control"
+                  onClick={openActionTool}
+                  disabled={!currentCombatant}
+                  title={"Enter action taken\nPress <Tab> to apply\nPress <Esc> to cancel"}
+                >
+                  Record Action
+                </button>
+              ) : (
+                <input
+                  className="action-tool-control action-search-control current-action-control"
+                  aria-label="Action text"
+                  value={actionText}
+                  onChange={(event) => setActionText(event.target.value)}
+                  onKeyDown={handleActionTextKeyDown}
+                  placeholder="Action"
+                  autoFocus
+                />
+              )}
+              <div className="current-status" aria-label="Current combatant status">
+                <div className="status-heading">
+                  <strong>{currentCombatant?.name ?? "No combatants"}</strong>
+                  <div className="status-hp-row">
+                    {currentCombatant && tempHp(currentCombatant) > 0 ? (
+                      <span className="status-temp-hp">{tempHp(currentCombatant)}</span>
+                    ) : null}
+                    <span className="status-hp">
+                      HP: {currentCombatant ? `${hp(currentCombatant)}/${maxHp(currentCombatant)}` : "0/0"}
                     </span>
-                  ))}
+                  </div>
+                  <span>{currentCombatant ? `${currentOrderNumber}/${activeCombatants.length}` : "0/0"}</span>
                 </div>
-                {currentCombatant && tempHp(currentCombatant) > 0 ? (
-                  <span className="status-temp-hp">Temp HP: {tempHp(currentCombatant)}</span>
-                ) : null}
+                <div className="status-details">
+                  <p className="latest-action">{currentLatestAction ?? ""}</p>
+                  <div className="condition-chips status-condition-chips" aria-label="Current conditions">
+                    {currentCombatant?.conditions.map((condition) => (
+                      <span
+                        className="condition-chip"
+                        key={condition.id}
+                        title={[condition.note, condition.expires].filter(Boolean).join(" - ")}
+                      >
+                        {condition.name}
+                        <button
+                          type="button"
+                          className="chip-remove"
+                          aria-label={`Remove ${condition.name} from ${currentCombatant.name}`}
+                          onClick={() => removeCondition(currentCombatant.id, condition.id)}
+                        >
+                          x
+                        </button>
+                      </span>
+                    ))}
+                  </div>
+                </div>
               </div>
             </div>
             <button type="button" onClick={nextTurn} disabled={activeCombatants.length === 0}>
@@ -939,19 +1211,14 @@ function App() {
 
           <div className="turn-order">
             {activeCombatants.map((combatant, index) => {
-              const previousRoundAction = latestActionByCombatantForRound(
-                state.encounter,
-                combatant.id,
-                previousRound
-              );
+              const displayedAction = actionSummaryForRound(state.encounter, combatant.id);
               const isCurrent = combatant.id === currentCombatant?.id;
               const hasActedThisRound = index < state.encounter.currentTurnIndex;
-              const latestCondition = combatant.conditions[combatant.conditions.length - 1];
-              const additionalConditionCount = Math.max(combatant.conditions.length - 1, 0);
-              const conditionTooltip = combatant.conditions.map((condition) => condition.name).join("\n");
               const isSelectedForCondition = selectedConditionTargets.includes(combatant.id);
               const isSelectedForDamage = selectedDamageTargets.includes(combatant.id);
+              const isSelectedForHealing = selectedHealingTargets.includes(combatant.id);
               const isDamageSelectable = isDamageToolOpen && isDamageTargeting && hp(combatant) > 0;
+              const isHealingSelectable = isHealingToolOpen && isHealingTargeting && hp(combatant) < maxHp(combatant);
 
               return (
                 <article
@@ -960,13 +1227,24 @@ function App() {
                     `turn-card-${combatant.kind}`,
                     isCurrent ? "current" : "",
                     hasActedThisRound ? "acted" : "",
-                    isConditionToolOpen || isDamageSelectable ? "selectable" : "",
-                    isSelectedForCondition || isSelectedForDamage ? "selected" : "",
-                    isDamageToolOpen && isDamageTargeting && hp(combatant) <= 0 ? "unavailable" : ""
+                    isConditionToolOpen || isDamageSelectable || isHealingSelectable ? "selectable" : "",
+                    isSelectedForCondition || isSelectedForDamage || isSelectedForHealing ? "selected" : "",
+                    isDamageToolOpen && isDamageTargeting && hp(combatant) <= 0
+                      || isHealingToolOpen && isHealingTargeting && hp(combatant) >= maxHp(combatant)
+                      ? "unavailable"
+                      : ""
                   ].filter(Boolean).join(" ")}
                   key={combatant.id}
                   aria-label={`${combatant.name}, ${combatant.kind}, ${index + 1} in initiative order`}
-                  aria-selected={isConditionToolOpen ? isSelectedForCondition : isDamageToolOpen && isDamageTargeting ? isSelectedForDamage : undefined}
+                  aria-selected={
+                    isConditionToolOpen
+                      ? isSelectedForCondition
+                      : isDamageToolOpen && isDamageTargeting
+                        ? isSelectedForDamage
+                        : isHealingToolOpen && isHealingTargeting
+                          ? isSelectedForHealing
+                          : undefined
+                  }
                   onClick={() => {
                     if (isConditionToolOpen) {
                       toggleConditionTarget(combatant.id);
@@ -975,6 +1253,11 @@ function App() {
 
                     if (isDamageToolOpen && isDamageTargeting) {
                       toggleDamageTarget(combatant.id);
+                      return;
+                    }
+
+                    if (isHealingToolOpen && isHealingTargeting) {
+                      toggleHealingTarget(combatant.id);
                     }
                   }}
                 >
@@ -986,22 +1269,29 @@ function App() {
                     <span className="turn-card-hp">{hp(combatant)}/{maxHp(combatant)}</span>
                   </div>
                   <p className="turn-card-action">
-                    {previousRoundAction ? `Round ${previousRoundAction.round}: ${previousRoundAction.text}` : ""}
+                    {displayedAction ?? ""}
                   </p>
                   <div className="turn-card-conditions">
-                    {latestCondition ? (
+                    {combatant.conditions.map((condition) => (
                       <span
                         className="turn-card-condition"
-                        title={[latestCondition.note, latestCondition.expires].filter(Boolean).join(" - ")}
+                        key={condition.id}
+                        title={[condition.note, condition.expires].filter(Boolean).join(" - ")}
                       >
-                        {latestCondition.name}
+                        <span className="turn-card-condition-name">{condition.name}</span>
+                        <button
+                          type="button"
+                          className="chip-remove turn-card-chip-remove"
+                          aria-label={`Remove ${condition.name} from ${combatant.name}`}
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            removeCondition(combatant.id, condition.id);
+                          }}
+                        >
+                          x
+                        </button>
                       </span>
-                    ) : null}
-                    {additionalConditionCount > 0 ? (
-                      <span className="turn-card-more" title={conditionTooltip}>
-                        +{additionalConditionCount}
-                      </span>
-                    ) : null}
+                    ))}
                   </div>
                 </article>
               );
@@ -1009,20 +1299,26 @@ function App() {
           </div>
 
           <div className="action-log">
-            <h3>Encounter Log</h3>
+            <h3>Action Log</h3>
             {state.encounter.actionLog.length === 0 ? (
               <p className="empty">Actions recorded here stay with this encounter.</p>
             ) : null}
             {state.encounter.actionLog
               .slice()
               .reverse()
-              .map((action) => (
-                <article className="log-entry" key={action.id}>
-                  <span>Round {action.round}</span>
-                  <strong>{action.combatantName}</strong>
-                  <p>{action.text}</p>
-                </article>
-              ))}
+              .map((action) =>
+                action.combatantName ? (
+                  <article className="log-entry" key={action.id}>
+                    <span className="log-entry-name">{action.combatantName}</span>
+                    <span className="log-entry-separator">-</span>
+                    <span className="log-entry-text">{action.text}</span>
+                  </article>
+                ) : (
+                  <article className="log-entry log-entry-system" key={action.id}>
+                    <span className="log-entry-text">{action.text}</span>
+                  </article>
+                )
+              )}
           </div>
         </section>
       </section>
