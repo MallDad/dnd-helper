@@ -183,6 +183,7 @@ function App() {
   const [editableTypeIds, setEditableTypeIds] = useState<string[]>([]);
   const [isCombatantEditMode, setIsCombatantEditMode] = useState(false);
   const [armedDeleteId, setArmedDeleteId] = useState<string | null>(null);
+  const [isSetupCollapsed, setIsSetupCollapsed] = useState(false);
 
   useEffect(() => {
     saveState(state);
@@ -340,6 +341,29 @@ function App() {
     const combatant = state.encounter.combatants.find((item) => item.id === id);
     const hp = clampHpToMax(numberFromInput(value), combatant?.maxHp ?? 0);
     updateCombatant(id, { hp });
+  }
+
+  function navigateSetupNumberInput(event: KeyboardEvent<HTMLInputElement>, rowIndex: number, columnIndex: number) {
+    const moves: Record<string, [number, number]> = {
+      ArrowDown: [1, 0],
+      ArrowLeft: [0, -1],
+      ArrowRight: [0, 1],
+      ArrowUp: [-1, 0]
+    };
+    const move = moves[event.key];
+
+    if (!move) {
+      return;
+    }
+
+    event.preventDefault();
+
+    const [rowDelta, columnDelta] = move;
+    const table = event.currentTarget.closest("table");
+    const nextField = table?.querySelector<HTMLInputElement>(
+      `[data-setup-row="${rowIndex + rowDelta}"][data-setup-column="${columnIndex + columnDelta}"]`
+    );
+    nextField?.focus();
   }
 
   function addInlineCombatant() {
@@ -826,12 +850,38 @@ function App() {
 
   return (
     <main className="app-shell">
-      <section className="workspace" aria-label="D&D helper workspace">
+      <section className={`workspace${isSetupCollapsed ? " setup-collapsed" : ""}`} aria-label="D&D helper workspace">
+        {isSetupCollapsed ? (
+          <aside className="setup-expand-rail" aria-label="Encounter setup controls">
+            <button
+              type="button"
+              className="secondary setup-collapse-button"
+              aria-expanded="false"
+              aria-label="Expand encounter setup"
+              title="Expand encounter setup"
+              onClick={() => setIsSetupCollapsed(false)}
+            >
+              {">"}
+            </button>
+          </aside>
+        ) : (
         <section className="panel setup-panel" aria-labelledby="setup-heading">
           <div className="panel-heading">
             <h2 id="setup-heading">Encounter Setup</h2>
+            <button
+              type="button"
+              className="secondary setup-collapse-button"
+              aria-expanded="true"
+              aria-controls="setup-panel-body"
+              aria-label="Collapse encounter setup"
+              title="Collapse encounter setup"
+              onClick={() => setIsSetupCollapsed(true)}
+            >
+              {"<"}
+            </button>
           </div>
 
+          <div className="setup-panel-body" id="setup-panel-body">
           <div className="compact-table-wrap">
             <table className="compact-table">
               <thead>
@@ -840,8 +890,8 @@ function App() {
                   <th>Type</th>
                   <th>Active</th>
                   <th className="compact-table-heading-cell compact-table-control-column"><span className="compact-table-heading-label">Init</span></th>
-                  <th className="compact-table-heading-cell compact-table-control-column"><span className="compact-table-heading-label">HP</span></th>
                   <th className="compact-table-heading-cell compact-table-control-column"><span className="compact-table-heading-label">Max<br />HP</span></th>
+                  <th className="compact-table-heading-cell compact-table-control-column"><span className="compact-table-heading-label">HP</span></th>
                   <th className="compact-table-heading-cell compact-table-control-column"><span className="compact-table-heading-label">Temp HP</span></th>
                 </tr>
               </thead>
@@ -941,8 +991,11 @@ function App() {
                             className="compact-number-input compact-number-input-short"
                             type="number"
                             aria-label={`Initiative for ${combatant.name}`}
+                            data-setup-row={orderedIndex}
+                            data-setup-column={0}
                             value={combatant.initiative ?? ""}
                             onChange={(event) => updateCombatantInitiative(combatant.id, event.target.value)}
+                            onKeyDown={(event) => navigateSetupNumberInput(event, orderedIndex, 0)}
                             placeholder="-"
                           />
                         </div>
@@ -952,9 +1005,12 @@ function App() {
                           className="compact-number-input compact-number-input-medium"
                           type="number"
                           min="0"
-                          aria-label={`HP for ${combatant.name}`}
-                          value={combatant.hp || ""}
-                          onChange={(event) => updateCombatantHp(combatant.id, event.target.value)}
+                          aria-label={`Max HP for ${combatant.name}`}
+                          data-setup-row={orderedIndex}
+                          data-setup-column={1}
+                          value={combatant.maxHp || ""}
+                          onChange={(event) => updateCombatantMaxHp(combatant, event.target.value)}
+                          onKeyDown={(event) => navigateSetupNumberInput(event, orderedIndex, 1)}
                           placeholder="0"
                         />
                       </td>
@@ -963,9 +1019,12 @@ function App() {
                           className="compact-number-input compact-number-input-medium"
                           type="number"
                           min="0"
-                          aria-label={`Max HP for ${combatant.name}`}
-                          value={combatant.maxHp || ""}
-                          onChange={(event) => updateCombatantMaxHp(combatant, event.target.value)}
+                          aria-label={`HP for ${combatant.name}`}
+                          data-setup-row={orderedIndex}
+                          data-setup-column={2}
+                          value={combatant.hp || ""}
+                          onChange={(event) => updateCombatantHp(combatant.id, event.target.value)}
+                          onKeyDown={(event) => navigateSetupNumberInput(event, orderedIndex, 2)}
                           placeholder="0"
                         />
                       </td>
@@ -975,8 +1034,11 @@ function App() {
                           type="number"
                           min="0"
                           aria-label={`Temp HP for ${combatant.name}`}
+                          data-setup-row={orderedIndex}
+                          data-setup-column={3}
                           value={combatant.tempHp || ""}
                           onChange={(event) => updateCombatantTempHp(combatant.id, event.target.value)}
+                          onKeyDown={(event) => navigateSetupNumberInput(event, orderedIndex, 3)}
                           placeholder="0"
                         />
                       </td>
@@ -1029,7 +1091,9 @@ function App() {
               Remove All Conditions
             </button>
           </div>
+          </div>
         </section>
+        )}
 
         <section className="panel combat-panel" aria-labelledby="combat-heading">
           <div className="panel-heading">

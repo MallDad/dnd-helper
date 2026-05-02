@@ -692,6 +692,86 @@ describe("App workflow", () => {
     expect(rowNames()).toEqual(["Mira", "Sildar", "Goblin"]);
   });
 
+  it("uses arrow keys to navigate between setup number fields without changing values", () => {
+    const now = new Date().toISOString();
+    const seededState: AppState = {
+      encounter: {
+        id: "encounter-setup-keyboard-navigation",
+        name: "Keyboard Navigation",
+        round: 1,
+        currentTurnIndex: 0,
+        createdAt: now,
+        updatedAt: now,
+        combatants: [
+          {
+            id: "player-mira",
+            name: "Mira",
+            kind: "player",
+            initiativeModifier: 3,
+            initiative: 18,
+            hp: 12,
+            maxHp: 20,
+            tempHp: 4,
+            conditions: []
+          },
+          {
+            id: "monster-goblin",
+            name: "Goblin",
+            kind: "monster",
+            initiativeModifier: 2,
+            initiative: 12,
+            hp: 6,
+            maxHp: 6,
+            tempHp: 0,
+            conditions: []
+          }
+        ],
+        actionLog: []
+      }
+    };
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(seededState));
+    render(<App />);
+
+    const miraInitiative = screen.getByLabelText("Initiative for Mira");
+    const miraMaxHp = screen.getByLabelText("Max HP for Mira");
+    const miraHp = screen.getByLabelText("HP for Mira");
+    const goblinMaxHp = screen.getByLabelText("Max HP for Goblin");
+
+    miraInitiative.focus();
+    fireEvent.keyDown(miraInitiative, { key: "ArrowRight" });
+    expect(miraMaxHp).toHaveFocus();
+    expect(miraInitiative).toHaveValue(18);
+
+    fireEvent.keyDown(miraMaxHp, { key: "ArrowRight" });
+    expect(miraHp).toHaveFocus();
+    expect(miraMaxHp).toHaveValue(20);
+
+    miraMaxHp.focus();
+    fireEvent.keyDown(miraMaxHp, { key: "ArrowDown" });
+    expect(goblinMaxHp).toHaveFocus();
+    expect(miraMaxHp).toHaveValue(20);
+  });
+
+  it("collapses and expands the encounter setup panel", async () => {
+    const user = userEvent.setup();
+    render(<App />);
+
+    const collapseButton = screen.getByRole("button", { name: "Collapse encounter setup" });
+    expect(screen.getByRole("table")).toBeInTheDocument();
+
+    await user.click(collapseButton);
+    expect(screen.queryByRole("table")).not.toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "Encounter Setup" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "New Combatant" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Long Rest" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Expand encounter setup" })).toHaveAttribute("aria-expanded", "false");
+    expect(screen.getByRole("heading", { name: "Combat Tracker - Round 1" })).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Expand encounter setup" }));
+    expect(screen.getByRole("table")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Collapse encounter setup" })).toHaveAttribute("aria-expanded", "true");
+  });
+
   it("clamps HP so it cannot exceed Max HP", async () => {
     const now = new Date().toISOString();
     const seededState: AppState = {
