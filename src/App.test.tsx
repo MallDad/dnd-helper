@@ -3,7 +3,21 @@ import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it } from "vitest";
 import App from "./App";
 import { STORAGE_KEY } from "./storage";
-import type { AppState } from "./types";
+import type { AppState, CombatantKind } from "./types";
+
+type User = ReturnType<typeof userEvent.setup>;
+
+async function addCombatant(user: User, name: string, kind?: CombatantKind) {
+  await user.click(screen.getByRole("button", { name: /edit roster/i }));
+  await user.type(screen.getByLabelText("New combatant name"), name);
+  await user.tab();
+
+  if (kind) {
+    await user.selectOptions(screen.getByLabelText(`Type for ${name}`), kind);
+  }
+
+  await user.click(screen.getByRole("button", { name: /done edits/i }));
+}
 
 describe("App workflow", () => {
   beforeEach(() => {
@@ -14,25 +28,15 @@ describe("App workflow", () => {
     const user = userEvent.setup();
     render(<App />);
 
-    await user.click(screen.getByRole("button", { name: /new combatant/i }));
-    await user.type(screen.getByLabelText(/name for combatant-/i), "Goblin 1");
-    await user.tab();
-    await user.tab();
+    await addCombatant(user, "Goblin 1");
     await user.clear(screen.getByLabelText("Initiative for Goblin 1"));
     await user.type(screen.getByLabelText("Initiative for Goblin 1"), "16");
 
-    await user.click(screen.getByRole("button", { name: /new combatant/i }));
-    await user.type(screen.getByLabelText(/name for combatant-/i), "Goblin 2");
-    await user.tab();
-    await user.tab();
+    await addCombatant(user, "Goblin 2");
     await user.clear(screen.getByLabelText("Initiative for Goblin 2"));
     await user.type(screen.getByLabelText("Initiative for Goblin 2"), "16");
 
-    await user.click(screen.getByRole("button", { name: /new combatant/i }));
-    await user.type(screen.getByLabelText(/name for combatant-/i), "Mira");
-    await user.tab();
-    await user.selectOptions(screen.getByLabelText("Type for Mira"), "player");
-    await user.tab();
+    await addCombatant(user, "Mira", "player");
     await user.clear(screen.getByLabelText("Initiative for Mira"));
     await user.type(screen.getByLabelText("Initiative for Mira"), "10");
 
@@ -102,7 +106,7 @@ describe("App workflow", () => {
       expect(saved.encounter.combatants.filter((combatant) => combatant.name.startsWith("Goblin")).every((combatant) => combatant.kind === "monster")).toBe(true);
     });
 
-    await user.click(screen.getByRole("button", { name: /new encounter/i }));
+    await user.click(screen.getByRole("button", { name: /clear encounter/i }));
 
     await waitFor(() => {
       const saved = JSON.parse(localStorage.getItem(STORAGE_KEY) ?? "{}") as AppState;
@@ -119,17 +123,11 @@ describe("App workflow", () => {
     const user = userEvent.setup();
     render(<App />);
 
-    await user.click(screen.getByRole("button", { name: /new combatant/i }));
-    await user.type(screen.getByLabelText(/name for combatant-/i), "Goblin 1");
-    await user.tab();
-    await user.tab();
+    await addCombatant(user, "Goblin 1");
     await user.clear(screen.getByLabelText("Initiative for Goblin 1"));
     await user.type(screen.getByLabelText("Initiative for Goblin 1"), "14");
 
-    await user.click(screen.getByRole("button", { name: /new combatant/i }));
-    await user.type(screen.getByLabelText(/name for combatant-/i), "Goblin 2");
-    await user.tab();
-    await user.tab();
+    await addCombatant(user, "Goblin 2");
     await user.clear(screen.getByLabelText("Initiative for Goblin 2"));
     await user.type(screen.getByLabelText("Initiative for Goblin 2"), "11");
 
@@ -153,13 +151,17 @@ describe("App workflow", () => {
     const user = userEvent.setup();
     render(<App />);
 
-    await user.click(screen.getByRole("button", { name: /new combatant/i }));
-    const nameInput = screen.getByLabelText(/name for combatant-/i);
+    expect(screen.queryByRole("button", { name: /new combatant/i })).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: /edit roster/i }));
+    const nameInput = screen.getByLabelText("New combatant name");
+    expect(nameInput).toHaveAttribute("placeholder", "New combatant name");
+
     await user.type(nameInput, "Bandit");
     await user.tab();
     const typeSelect = screen.getByLabelText("Type for Bandit");
     await user.selectOptions(typeSelect, "npc");
-    await user.tab();
+    await user.click(screen.getByRole("button", { name: /done edits/i }));
 
     expect(screen.getAllByText("Bandit").length).toBeGreaterThan(0);
     expect(screen.queryByDisplayValue("Bandit")).not.toBeInTheDocument();
@@ -200,13 +202,13 @@ describe("App workflow", () => {
     render(<App />);
 
     expect(screen.queryByDisplayValue("Bandit")).not.toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: /edit combatants/i }));
+    await user.click(screen.getByRole("button", { name: /edit roster/i }));
     expect(screen.getByRole("button", { name: /done edits/i })).toBeInTheDocument();
     expect(screen.getByDisplayValue("Bandit")).toBeInTheDocument();
     expect(screen.getByLabelText("Type for Bandit")).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: /done edits/i }));
-    expect(screen.getByRole("button", { name: /edit combatants/i })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /edit roster/i })).toBeInTheDocument();
     expect(screen.queryByDisplayValue("Bandit")).not.toBeInTheDocument();
     expect(screen.queryByLabelText("Type for Bandit")).not.toBeInTheDocument();
   });
@@ -251,7 +253,7 @@ describe("App workflow", () => {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(seededState));
     render(<App />);
 
-    await user.click(screen.getByRole("button", { name: /edit combatants/i }));
+    await user.click(screen.getByRole("button", { name: /edit roster/i }));
     await user.click(screen.getByRole("button", { name: /delete bandit/i }));
     expect(screen.getByRole("button", { name: /confirm delete bandit/i })).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: /confirm delete bandit/i }));
@@ -537,7 +539,7 @@ describe("App workflow", () => {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(seededState));
     render(<App />);
 
-    await user.click(screen.getByRole("button", { name: /new encounter/i }));
+    await user.click(screen.getByRole("button", { name: /clear encounter/i }));
 
     await waitFor(() => {
       const saved = JSON.parse(localStorage.getItem(STORAGE_KEY) ?? "{}") as AppState;
@@ -606,7 +608,7 @@ describe("App workflow", () => {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(seededState));
     render(<App />);
 
-    await user.click(screen.getByRole("button", { name: /remove all conditions/i }));
+    await user.click(screen.getByRole("button", { name: /remove conditions/i }));
 
     await waitFor(() => {
       const saved = JSON.parse(localStorage.getItem(STORAGE_KEY) ?? "{}") as AppState;
@@ -970,11 +972,7 @@ describe("App workflow", () => {
     const user = userEvent.setup();
     render(<App />);
 
-    await user.click(screen.getByRole("button", { name: /new combatant/i }));
-    await user.type(screen.getByLabelText(/name for combatant-/i), "Wren");
-    await user.tab();
-    await user.selectOptions(screen.getByLabelText("Type for Wren"), "player");
-    await user.tab();
+    await addCombatant(user, "Wren", "player");
     await user.clear(screen.getByLabelText("Initiative for Wren"));
     await user.type(screen.getByLabelText("Initiative for Wren"), "15");
 
@@ -1417,7 +1415,7 @@ describe("App workflow", () => {
     });
   });
 
-  it("remove all conditions clears non-Exhaustion conditions and reduces Exhaustion by one step", async () => {
+  it("remove conditions clears non-Exhaustion conditions without changing Exhaustion", async () => {
     const now = new Date().toISOString();
     const seededState: AppState = {
       encounter: {
@@ -1460,16 +1458,16 @@ describe("App workflow", () => {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(seededState));
     render(<App />);
 
-    await user.click(screen.getByRole("button", { name: /remove all conditions/i }));
+    await user.click(screen.getByRole("button", { name: /remove conditions/i }));
 
     expect(screen.queryByText("Poisoned")).not.toBeInTheDocument();
     expect(screen.queryByText("Prone")).not.toBeInTheDocument();
     expect(screen.queryByText("Frightened")).not.toBeInTheDocument();
-    expect(screen.getAllByText("Exhaustion 2").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("Exhaustion 3").length).toBeGreaterThan(0);
 
     await waitFor(() => {
       const saved = JSON.parse(localStorage.getItem(STORAGE_KEY) ?? "{}") as AppState;
-      expect(saved.encounter.combatants.find((combatant) => combatant.name === "Mira")?.conditions.map((condition) => condition.name)).toEqual(["Exhaustion 2"]);
+      expect(saved.encounter.combatants.find((combatant) => combatant.name === "Mira")?.conditions.map((condition) => condition.name)).toEqual(["Exhaustion 3"]);
       expect(saved.encounter.combatants.find((combatant) => combatant.name === "Goblin")?.conditions).toEqual([]);
     });
   });
@@ -1515,9 +1513,7 @@ describe("App workflow", () => {
     const user = userEvent.setup();
     const { unmount } = render(<App />);
 
-    await user.click(screen.getByRole("button", { name: /new combatant/i }));
-    await user.type(screen.getByLabelText(/name for combatant-/i), "Orrin");
-    await user.tab();
+    await addCombatant(user, "Orrin");
     unmount();
 
     render(<App />);

@@ -118,7 +118,7 @@ function clearConditionsExceptExhaustion(existingConditions: EncounterCombatant[
     exhaustionLevelIndex(condition.name) >= 0 || condition.name === DIED_OF_EXHAUSTION
   );
 
-  return exhaustionCondition ? removeOneExhaustionStep([exhaustionCondition]) : [];
+  return exhaustionCondition ? [exhaustionCondition] : [];
 }
 
 function updateEncounter(state: AppState, updater: (encounter: Encounter) => Encounter): AppState {
@@ -183,6 +183,8 @@ function App() {
   const [editableTypeIds, setEditableTypeIds] = useState<string[]>([]);
   const [isCombatantEditMode, setIsCombatantEditMode] = useState(false);
   const [armedDeleteId, setArmedDeleteId] = useState<string | null>(null);
+  const [newCombatantName, setNewCombatantName] = useState("");
+  const [newCombatantKind, setNewCombatantKind] = useState<CombatantKind>("monster");
   const [isSetupCollapsed, setIsSetupCollapsed] = useState(false);
 
   useEffect(() => {
@@ -366,7 +368,7 @@ function App() {
     nextField?.focus();
   }
 
-  function addInlineCombatant() {
+  function createCombatant(name: string, kind: CombatantKind) {
     const id = createId("combatant");
 
     commitState(updateEncounter(state, (encounter) => ({
@@ -375,8 +377,8 @@ function App() {
         ...encounter.combatants,
         {
           id,
-          name: "",
-          kind: "monster",
+          name,
+          kind,
           active: true,
           initiativeModifier: 0,
           initiative: null,
@@ -387,8 +389,19 @@ function App() {
         }
       ]
     })));
-    setEditableNameIds((current) => [...current, id]);
-    setEditableTypeIds((current) => [...current, id]);
+  }
+
+  function commitNewCombatantDraft() {
+    const name = newCombatantName.trim();
+
+    if (!name) {
+      setNewCombatantName("");
+      return;
+    }
+
+    createCombatant(name, newCombatantKind);
+    setNewCombatantName("");
+    setNewCombatantKind("monster");
   }
 
   function toggleCombatantEditMode() {
@@ -896,7 +909,7 @@ function App() {
                 </tr>
               </thead>
               <tbody>
-                {state.encounter.combatants.length === 0 ? (
+                {state.encounter.combatants.length === 0 && !isCombatantEditMode ? (
                   <tr>
                     <td colSpan={7} className="empty">Add combatants to build the encounter.</td>
                   </tr>
@@ -1045,32 +1058,97 @@ function App() {
                     </tr>
                   );
                 })}
+                {isCombatantEditMode ? (
+                  <tr className="new-combatant-row">
+                    <td>
+                      <div className="name-cell">
+                        <span className="delete-combatant-spacer" aria-hidden="true" />
+                        <input
+                          className="compact-name-input"
+                          aria-label="New combatant name"
+                          value={newCombatantName}
+                          onChange={(event) => setNewCombatantName(event.target.value)}
+                          onBlur={commitNewCombatantDraft}
+                          placeholder="New combatant name"
+                        />
+                      </div>
+                    </td>
+                    <td>
+                      <select
+                        className="compact-select-input"
+                        aria-label="Type for new combatant"
+                        value={newCombatantKind}
+                        onChange={(event) => setNewCombatantKind(event.target.value as CombatantKind)}
+                      >
+                        <option value="player">Player</option>
+                        <option value="npc">NPC</option>
+                        <option value="monster">Monster</option>
+                      </select>
+                    </td>
+                    <td>
+                      <input type="checkbox" aria-label="Active for new combatant" checked readOnly />
+                    </td>
+                    <td className="compact-table-control-column compact-table-input-cell">
+                      <div className="initiative-cell">
+                        <span className="initiative-move-spacer" aria-hidden="true" />
+                        <input
+                          className="compact-number-input compact-number-input-short"
+                          type="number"
+                          aria-label="Initiative for new combatant"
+                          disabled
+                          placeholder="-"
+                        />
+                      </div>
+                    </td>
+                    <td className="compact-table-control-column compact-table-input-cell">
+                      <input
+                        className="compact-number-input compact-number-input-medium"
+                        type="number"
+                        aria-label="Max HP for new combatant"
+                        disabled
+                        placeholder="0"
+                      />
+                    </td>
+                    <td className="compact-table-control-column compact-table-input-cell">
+                      <input
+                        className="compact-number-input compact-number-input-medium"
+                        type="number"
+                        aria-label="HP for new combatant"
+                        disabled
+                        placeholder="0"
+                      />
+                    </td>
+                    <td className="compact-table-control-column compact-table-input-cell">
+                      <input
+                        className="compact-number-input compact-number-input-short"
+                        type="number"
+                        aria-label="Temp HP for new combatant"
+                        disabled
+                        placeholder="0"
+                      />
+                    </td>
+                  </tr>
+                ) : null}
               </tbody>
             </table>
           </div>
 
-          <div className="inline-control-row">
-            <button type="button" className="secondary section-add-toggle" onClick={addInlineCombatant}>
-              New Combatant
-            </button>
+          <div className="button-row encounter-controls">
             <button
               type="button"
               className={`secondary section-add-toggle${isCombatantEditMode ? " active-toggle" : ""}`}
               onClick={toggleCombatantEditMode}
-              title={"Change name(s)\nChange type\nDelete row"}
+              title="Add/Edit/Delete Combatant"
             >
-              {isCombatantEditMode ? "Done Edits" : "Edit Combatants"}
+              {isCombatantEditMode ? "Done Edits" : "Edit Roster"}
             </button>
-          </div>
-
-          <div className="button-row encounter-controls">
             <button
               type="button"
               className="secondary"
               onClick={newEncounter}
               title={"Removes monsters\nClears initiative\nClears Action Log\nResets round tracking"}
             >
-              New Encounter
+              Clear Encounter
             </button>
             <button
               type="button"
@@ -1086,9 +1164,9 @@ function App() {
               className="secondary"
               onClick={removeAllConditions}
               disabled={state.encounter.combatants.length === 0}
-              title={"Removes all conditions\nDecreases Exhaustion 1 Step"}
+              title={"Removes all conditions\nKeeps Exhaustion unchanged"}
             >
-              Remove All Conditions
+              Remove Conditions
             </button>
           </div>
           </div>

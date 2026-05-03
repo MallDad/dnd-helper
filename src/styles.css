@@ -416,6 +416,16 @@ h3 {
   background: #842930;
 }
 
+.delete-combatant-spacer {
+  flex: 0 0 24px;
+  width: 24px;
+  height: 24px;
+}
+
+.new-combatant-row {
+  background: #f7faf8;
+}
+
 .list,
 .combatant-list,
 .action-log {
