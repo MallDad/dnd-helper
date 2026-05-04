@@ -1,5 +1,5 @@
-import { ChangeEvent, FormEvent, KeyboardEvent, useEffect, useMemo, useState } from "react";
-import { DEFAULT_CONDITIONS_2024 } from "./conditions";
+import { ChangeEvent, FormEvent, KeyboardEvent, useEffect, useMemo, useRef, useState } from "react";
+import { DEFAULT_CONDITIONS_2024, conditionImageUrl } from "./conditions";
 import {
   createEmptyEncounter,
   latestActionByCombatantForRound,
@@ -155,6 +155,71 @@ function createRoundLogEntry(round: number) {
     text: `Round ${round}`,
     createdAt: new Date().toISOString()
   };
+}
+
+function ConditionPreview({ conditionName }: { conditionName: string }) {
+  const imageUrl = conditionImageUrl(conditionName);
+  const previewRef = useRef<HTMLImageElement>(null);
+
+  function positionPreview() {
+    const preview = previewRef.current;
+    const anchor = preview?.parentElement;
+
+    if (!preview || !anchor || typeof window === "undefined") {
+      return;
+    }
+
+    const edgePadding = 8;
+    const gap = 8;
+    const maxWidth = 220;
+    const viewportWidth = window.innerWidth;
+    const previewWidth = Math.min(maxWidth, Math.max(0, viewportWidth - edgePadding * 2));
+    const naturalRatio = preview.naturalWidth > 0 ? preview.naturalHeight / preview.naturalWidth : 1.4;
+    const previewHeight = previewWidth * naturalRatio;
+    const anchorRect = anchor.getBoundingClientRect();
+    const left = Math.min(
+      Math.max(anchorRect.left, edgePadding),
+      Math.max(edgePadding, viewportWidth - previewWidth - edgePadding)
+    );
+    const preferredTop = anchorRect.top - previewHeight - gap;
+    const top = Math.max(0, preferredTop);
+
+    preview.style.setProperty("--condition-preview-left", `${left}px`);
+    preview.style.setProperty("--condition-preview-top", `${top}px`);
+    preview.style.setProperty("--condition-preview-width", `${previewWidth}px`);
+  }
+
+  useEffect(() => {
+    const preview = previewRef.current;
+    const anchor = preview?.parentElement;
+
+    if (!anchor) {
+      return undefined;
+    }
+
+    anchor.addEventListener("pointerenter", positionPreview);
+    anchor.addEventListener("focusin", positionPreview);
+    window.addEventListener("resize", positionPreview);
+    window.addEventListener("scroll", positionPreview, true);
+
+    return () => {
+      anchor.removeEventListener("pointerenter", positionPreview);
+      anchor.removeEventListener("focusin", positionPreview);
+      window.removeEventListener("resize", positionPreview);
+      window.removeEventListener("scroll", positionPreview, true);
+    };
+  });
+
+  return imageUrl ? (
+    <img
+      ref={previewRef}
+      className="condition-card-preview"
+      src={imageUrl}
+      alt={`${conditionName} condition card`}
+      loading="lazy"
+      onLoad={positionPreview}
+    />
+  ) : null;
 }
 
 function App() {
@@ -1331,7 +1396,10 @@ function App() {
                         key={condition.id}
                         title={[condition.note, condition.expires].filter(Boolean).join(" - ")}
                       >
-                        {condition.name}
+                        <span className="condition-preview-anchor">
+                          {condition.name}
+                          <ConditionPreview conditionName={condition.name} />
+                        </span>
                         <button
                           type="button"
                           className="chip-remove"
@@ -1420,7 +1488,10 @@ function App() {
                         key={condition.id}
                         title={[condition.note, condition.expires].filter(Boolean).join(" - ")}
                       >
-                        <span className="turn-card-condition-name">{condition.name}</span>
+                        <span className="condition-preview-anchor turn-card-condition-name">
+                          {condition.name}
+                          <ConditionPreview conditionName={condition.name} />
+                        </span>
                         <button
                           type="button"
                           className="chip-remove turn-card-chip-remove"

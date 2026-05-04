@@ -69,6 +69,7 @@ describe("App workflow", () => {
     await user.click(applyPoisonedButton);
 
     expect(screen.getAllByText("Poisoned").length).toBeGreaterThan(0);
+    expect(screen.getAllByAltText("Poisoned condition card").length).toBeGreaterThan(0);
     expect(screen.getAllByRole("button", { name: /remove poisoned from/i }).length).toBeGreaterThan(0);
 
     await user.click(screen.getByRole("button", { name: /record action/i }));
